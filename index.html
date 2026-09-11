@@ -6132,10 +6132,17 @@ function renderPage(n, content, guides){
      long client name run straight under the logo. A name too long even for
      that shrinks rather than truncating: an ellipsis in the middle of the
      client's own name on every page is not an acceptable way to save space. */
-  var head = add(el('div', box(272, 72.5, 273.6, 12) + 'font-family:' + F.legible +
-    ';font-size:' + px(8) + ';color:' + C.blue + ';text-align:right;line-height:1.2;' +
-    'white-space:nowrap;', TYPES[S.meta.reportType] + ' Report (' +
-    (S.company.name || 'Company name') + ') for FY ' + S.meta.financialYear));
+  /* The red arrow in the artwork spans y 77.2-87.6, so its point is centred on
+     82.4 - and in the design the header text is centred on that same line,
+     sitting just above the rule with the arrow as its full stop. Centring the
+     text in a fixed box anchored there keeps that alignment true whatever
+     size the text ends up at, which matters because it shrinks to fit. */
+  var headBox = add(el('div', box(272, 76.4, 273.6, 12) +
+    'display:flex;align-items:center;justify-content:flex-end;'));
+  var head = headBox.appendChild(el('span','font-family:' + F.legible +
+    ';font-size:' + px(10) + ';color:' + C.blue + ';line-height:1.15;white-space:nowrap;',
+    TYPES[S.meta.reportType] + ' Report (' + (S.company.name || 'Company name') +
+    ') for FY ' + S.meta.financialYear));
 
   /* Spine, between the two rules the plate already draws. */
   var spine = add(el('div', box(548, 341, 24, 219) +
@@ -6157,7 +6164,10 @@ function renderPage(n, content, guides){
   live.dataset.live = '1';
   if (content) live.appendChild(content);
 
-  withLayout(p, [function(){ fitLine(head, 271, [8, 7.5, 7, 6.5, 6, 5.5]); }]);
+  /* The artwork sets this at 8 pt, which is legible on paper and too small on
+     a screen at any sensible zoom. It starts at 10 and steps down only as far
+     as the client's name actually demands. */
+  withLayout(p, [function(){ fitLine(head, 271, [10, 9.5, 9, 8.5, 8, 7.5, 7]); }]);
   return p;
 }
 
