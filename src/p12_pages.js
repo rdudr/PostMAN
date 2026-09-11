@@ -93,9 +93,15 @@ function renderCover(){
   }
 
   /* --- the navy strip's vertical KISEM --- */
+  /* Both vertical runs in the artwork have PDF text direction (0,-1): they
+     read BOTTOM TO TOP, with the glyph tops facing left. CSS vertical-rl
+     gives the opposite - top to bottom, tops facing right - so it needs the
+     180 degree turn to match. Without it the word is upside down relative to
+     the design, which reads as a mistake rather than a style. */
+  var VERT = 'writing-mode:vertical-rl;transform:rotate(180deg);';
   var strip = add(el('div', box(15.2, 0, 28.7, 149) +
     'display:flex;align-items:center;justify-content:center;'));
-  strip.appendChild(el('span','writing-mode:vertical-rl;font-family:Arial,Helvetica,sans-serif;' +
+  strip.appendChild(el('span', VERT + 'font-family:Arial,Helvetica,sans-serif;' +
     'font-weight:700;font-size:' + px(16) + ';letter-spacing:.42em;color:#fff;white-space:nowrap;',
     'KISEM'));
 
@@ -191,17 +197,22 @@ function renderPage(n, content, guides){
   plate.src = PLATE2; plate.alt = '';
   add(plate);
 
-  /* Running header, right-aligned to the rule that sits under it. */
-  add(el('div', box(250, 72.5, 295.6, 12) + 'font-family:' + F.legible + ';font-size:' + px(8) +
-    ';color:' + C.blue + ';text-align:right;line-height:1.2;white-space:nowrap;overflow:hidden;' +
-    'text-overflow:ellipsis;', TYPES[S.meta.reportType] + ' Report (' +
+  /* Running header, right-aligned to the rule beneath it. It starts clear of
+     the KISEM logo, which ends at x 264.8 - anchoring it further left let a
+     long client name run straight under the logo. A name too long even for
+     that shrinks rather than truncating: an ellipsis in the middle of the
+     client's own name on every page is not an acceptable way to save space. */
+  var head = add(el('div', box(272, 72.5, 273.6, 12) + 'font-family:' + F.legible +
+    ';font-size:' + px(8) + ';color:' + C.blue + ';text-align:right;line-height:1.2;' +
+    'white-space:nowrap;', TYPES[S.meta.reportType] + ' Report (' +
     (S.company.name || 'Company name') + ') for FY ' + S.meta.financialYear));
 
   /* Spine, between the two rules the plate already draws. */
   var spine = add(el('div', box(548, 341, 24, 219) +
     'display:flex;align-items:center;justify-content:center;'));
-  spine.appendChild(el('span','writing-mode:vertical-rl;font-family:' + F.geo + ';font-size:' +
-    px(11) + ';color:' + C.charcoal + ';white-space:nowrap;', IEA.spine));
+  /* Same bottom-to-top direction as the cover strip - see VERT there. */
+  spine.appendChild(el('span','writing-mode:vertical-rl;transform:rotate(180deg);font-family:' +
+    F.geo + ';font-size:' + px(11) + ';color:' + C.charcoal + ';white-space:nowrap;', IEA.spine));
 
   /* Page number, inside the stadium the plate draws. */
   add(at(536, 753.5, 60, 'font-family:' + F.cond2 + ';font-weight:700;font-size:' + px(5) +
@@ -215,6 +226,8 @@ function renderPage(n, content, guides){
      directly whether anything overflowed, instead of eyeballing PDFs. */
   live.dataset.live = '1';
   if (content) live.appendChild(content);
+
+  withLayout(p, [function(){ fitLine(head, 271, [8, 7.5, 7, 6.5, 6, 5.5]); }]);
   return p;
 }
 
