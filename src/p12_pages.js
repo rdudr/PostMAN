@@ -433,7 +433,10 @@ function renderAll(){
   document.body.classList.toggle('verify-mode', S.active === 'verify');
   var w = q('work');
   clear(w);
-  var sec = sectionById(S.active) || SECTIONS[0];
+  var sec = sectionById(S.active);
+  /* A draft saved when the ledger was still a menu entry reopens on the
+     cover rather than on a screen that no longer exists. */
+  if (!sec){ sec = SECTIONS[0]; S.active = sec.id; }
   w.appendChild(el('h1','', sec.title)).className = 'wt';
 
   if (sec.opt && !S.enabled[sec.opt]){
@@ -451,6 +454,11 @@ function renderAll(){
   }
   if (FORMS[sec.id]) FORMS[sec.id](w);
   else w.appendChild(el('p','', 'Nothing to edit here — this section is generated.')).className = 'wd';
+
+  /* Every chapter that prints recommendations offers to add one right
+     here, under the figures that prompted it, rather than on a separate
+     ledger screen the assessor has to go and find. */
+  if (RECO_CHAPTERS.indexOf(sec.id) >= 0) chapterRecoCard(w, sec.id);
 
   drawPreview();
 }

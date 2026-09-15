@@ -73,6 +73,9 @@ q('demo').addEventListener('click', function(){
   var coalSeed = [86,91,94,99,104,102,96,92,89,93,97,95];
   S.baseline.elec = labels.map(function(m,i){ return { month:m, kwh:kwhSeed[i]*1000 }; });
   S.baseline.thermal = labels.map(function(m,i){ return { month:m, qty:coalSeed[i] }; });
+  S.baseline._v2 = false; normalizeBaseline(); S.baseline.prodUnit = 'Metre';
+  S.baseline.months.forEach(function(p, i){ S.baseline.production[monthKey(p.y, p.m)] = [10769968,8840359,7429131,9989305,11313311,11943126,7279559,10059122,11810536,11232890,10500000,10900000][i]; });
+  syncBaselineLegacy();
   var mdSeed = [597,612,628,641,666,655,624,601,589,608,631,619];
   var pfSeed = [0.962,0.958,0.949,0.941,0.936,0.944,0.951,0.955,0.947,0.938,0.952,0.961];
   S.bills = labels.map(function(m,i){
@@ -85,6 +88,7 @@ q('demo').addEventListener('click', function(){
       duty:duty, other:0, rebate:0, net:energy+demand+fppa+duty,
       todNight:Math.round(kwh*0.33), todPeak:Math.round(kwh*0.11) };
   });
+  S.billCfg = blankBillCfg(); S.billCfg.discom = 'MGVCL'; S.billCfg.consumerNo = '14004'; S.billCfg.contractDemand = 800;
   S.billNotes.pfNote = 'The monthly power factor dropped below the desirable level of 0.95 in five months, with the lowest recorded value 0.936. A low power factor forfeits the utility rebate and increases reactive current, system losses and transformer loading.';
   S.billNotes.cdNote = 'The plant operates at a contract demand of 800 kVA against a highest recorded maximum demand of 666 kVA. Because minimum billing demand is 85 % of contract demand, the plant pays for 680 kVA every month regardless of use.';
   S.dist.demand = { contract:800, avg:508.91, min:98.26, max:607.11,

@@ -15,7 +15,8 @@ var SECTIONS = [
   { id:'certificate', group:'Front matter', title:'Certificate',           always:true, derived:true },
 
   { id:'summary',     group:'Assessment',   title:'Executive summary',     always:true, derived:true },
-  { id:'ledger',      group:'Assessment',   title:'Recommendation ledger', always:true },
+  /* Recommendations are added on the chapter they belong to - the bill
+     and each utility - so there is no separate ledger screen in the menu. */
   { id:'production',  group:'Assessment',   title:'Production process',    always:true },
   { id:'baseline',    group:'Assessment',   title:'Energy baseline',       always:true },
   { id:'water',       group:'Assessment',   title:'Water baseline',        opt:'water' },

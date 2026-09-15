@@ -56,7 +56,7 @@ function sldLayout(force){
   Object.keys(byDepth).forEach(function(d){
     var row = byDepth[d], y = 40 + d * 92, x = 30;
     row.forEach(function(n){
-      var t = SLD_TYPES[n.type] || SLD_TYPES.load;
+      var t = sldBox(n);
       if (force || n.x === null || n.y === null){ n.x = x; n.y = y; }
       x += t.w + 26;
     });
@@ -83,14 +83,42 @@ function sldBuildFromHierarchy(){
   save();
 }
 
+/* The drawn size of a node: the type's minimum, widened to fit whatever is
+   written on it. Measured from the text, so a box never overflows. */
+function sldBox(n){
+  var t = SLD_TYPES[n.type] || SLD_TYPES.load;
+  var l1 = [], l2 = [];
+  if (n.type !== 'bus'){
+    if (n.rating) l1.push(n.rating);
+    if (num(n.kw) !== null) l1.push(fix(n.kw,1) + ' kW');
+    if (num(n.kva) !== null) l1.push(fix(n.kva,1) + ' kVA');
+    if (num(n.pf) !== null) l2.push('PF ' + fix(n.pf,2));
+    if (num(n.vthd) !== null) l2.push('VTHD ' + fix(n.vthd,1) + '%');
+    if (num(n.ithd) !== null) l2.push('ITHD ' + fix(n.ithd,1) + '%');
+    if (n.recId) l2.push(n.recId);
+  }
+  var lines = [l1.join(' · '), l2.join(' · ')].filter(Boolean);
+  var longest = Math.max(n.name.length * 6.4 + 16, (lines[0] || '').length * 4.7 + 14, (lines[1] || '').length * 4.7 + 14);
+  var w = Math.max(t.w, Math.ceil(longest));
+  var h = n.type === 'bus' ? t.h : Math.max(t.h, 22 + lines.length * 11 + 4);
+  return { w:w, h:h, fill:t.fill, stroke:t.stroke, lines:lines };
+}
 function sldSvg(forReport, guides){
   var dim = sldLayout(false);
   var svgNS = 'http://www.w3.org/2000/svg';
   var svg = document.createElementNS(svgNS, 'svg');
   svg.setAttribute('viewBox', '0 0 ' + dim.width + ' ' + dim.height);
-  svg.setAttribute('width', forReport ? px(LIVE.w) : dim.width);
-  if (forReport) svg.setAttribute('height', (LIVE.w / dim.width) * dim.height * PT + 'px');
-  else svg.setAttribute('height', dim.height);
+  if (forReport){
+    svg.setAttribute('width', px(LIVE.w));
+    svg.setAttribute('height', (LIVE.w / dim.width) * dim.height * PT + 'px');
+  } else {
+    /* On screen the drawing scales to the panel it sits in - it used to be
+       drawn at its natural width and ran out of the box on anything but a
+       wide monitor. */
+    svg.setAttribute('width', '100%');
+    svg.style.maxWidth = dim.width + 'px';
+    svg.style.height = 'auto';
+  }
   svg.style.display = 'block';
 
   function mk(tag, attrs){
@@ -102,7 +130,7 @@ function sldSvg(forReport, guides){
   S.sld.nodes.forEach(function(n){
     if (!n.parent) return;
     var p = sldNode(n.parent); if (!p) return;
-    var pt = SLD_TYPES[p.type] || SLD_TYPES.load, nt = SLD_TYPES[n.type] || SLD_TYPES.load;
+    var pt = sldBox(p), nt = sldBox(n);
     var x1 = p.x + pt.w/2, y1 = p.y + pt.h, x2 = n.x + nt.w/2, y2 = n.y;
     var mid = (y1 + y2) / 2;
     var d = 'M' + x1 + ' ' + y1 + ' L' + x1 + ' ' + mid + ' L' + x2 + ' ' + mid + ' L' + x2 + ' ' + y2;
@@ -110,78 +138,118 @@ function sldSvg(forReport, guides){
       'stroke-dasharray': n.provisional ? '5 4' : '' }));
   });
   S.sld.nodes.forEach(function(n){
-    var t = SLD_TYPES[n.type] || SLD_TYPES.load;
+    var t = sldBox(n);
+    var picked = S.sld.selected === n.id && !forReport;
     var g = mk('g', { transform:'translate(' + n.x + ',' + n.y + ')' });
-    g.setAttribute('class', 'sldnode');
+    g.setAttribute('class', 'sldnode' + (picked ? ' sel' : ''));
     g.dataset.id = n.id;
     var over = (num(n.vthd) !== null && num(n.vthd) > 5) || (num(n.ithd) !== null && num(n.ithd) > 8);
     g.appendChild(mk('rect', { width:t.w, height:t.h, rx: n.type==='bus'?3:5,
-      fill:t.fill, stroke: over ? C.bad : t.stroke,
-      'stroke-width': over ? 2 : 1.3,
+      fill:t.fill, stroke: over ? C.bad : (picked ? '#5b9bff' : t.stroke),
+      'stroke-width': (over || picked) ? 2 : 1.3,
       'stroke-dasharray': n.provisional ? '5 3' : '' }));
-    var label = mk('text', { x:t.w/2, y: n.type==='bus' ? 15 : 16, 'text-anchor':'middle',
+    var label = mk('text', { x:t.w/2, y:15, 'text-anchor':'middle',
       'font-family':'Archivo, Arial, sans-serif', 'font-size':10.5, 'font-weight':600,
       fill: n.type==='bus' ? '#fff' : C.charcoal });
-    label.textContent = n.name.length > 24 ? n.name.slice(0,23) + '…' : n.name;
+    label.textContent = n.name.length > 30 ? n.name.slice(0,29) + '…' : n.name;
     g.appendChild(label);
-    if (n.type !== 'bus'){
-      var bits = [];
-      if (n.rating) bits.push(n.rating);
-      if (num(n.kw) !== null) bits.push(fix(n.kw,1) + ' kW');
-      if (num(n.pf) !== null) bits.push('PF ' + fix(n.pf,2));
-      if (num(n.ithd) !== null) bits.push('ITHD ' + fix(n.ithd,1) + '%');
-      if (bits.length){
-        var sub = mk('text', { x:t.w/2, y:29, 'text-anchor':'middle',
-          'font-family':'IBM Plex Mono, monospace', 'font-size':8,
-          fill: over ? C.bad : C.ink3 });
-        sub.textContent = bits.join(' · ');
-        g.appendChild(sub);
-      }
-    }
+    /* Two short annotation lines rather than one long one, so a node that
+       carries rating, kW, kVA, PF and both THDs still fits its box. */
+    t.lines.forEach(function(line, li){
+      var sub = mk('text', { x:t.w/2, y:27 + li*11, 'text-anchor':'middle',
+        'font-family':'IBM Plex Mono, monospace', 'font-size':7.6,
+        fill: (over && li === 1) ? C.bad : C.ink3 });
+      sub.textContent = line;
+      g.appendChild(sub);
+    });
     svg.appendChild(g);
   });
   return { svg:svg, dim:dim };
 }
 
+/* Removing a node hands its children to its parent, so a PCC deleted by
+   mistake does not orphan every MCC and motor under it. */
+function sldDelete(id){
+  var n = sldNode(id); if (!n) return;
+  S.sld.nodes.forEach(function(c){ if (c.parent === id) c.parent = n.parent; });
+  S.sld.nodes = S.sld.nodes.filter(function(c){ return c.id !== id; });
+  if (S.sld.selected === id) S.sld.selected = null;
+  sldLayout(false); save(); renderAll();
+}
+function sldChildType(t){
+  return (t === 'grid' || t === 'dg' || t === 'solar') ? 'transformer' : t === 'transformer' ? 'bus'
+       : t === 'bus' ? 'pcc' : t === 'pcc' ? 'mcc' : 'load';
+}
+function sldNodeCard(n){
+  var t = SLD_TYPES[n.type] || SLD_TYPES.load;
+  var box = el('div','border:1px solid var(--line);border-left:3px solid ' + t.stroke +
+    ';border-radius:0 8px 8px 0;padding:10px 12px;margin-bottom:8px;background:var(--panel);');
+  if (S.sld.selected === n.id) box.style.boxShadow = '0 0 0 2px var(--brand)';
+  box.id = 'sldn-' + n.id;
+  var head = el('div','display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;');
+  head.appendChild(el('strong','font-size:13px;', n.name || '(unnamed)'));
+  head.appendChild(el('span','font-size:11px;color:var(--ink-3);font-family:"IBM Plex Mono",monospace;', t.label));
+  var acts = el('div','margin-left:auto;display:flex;gap:6px;');
+  acts.appendChild(btn('+ Add child', function(){
+    var ct = sldChildType(n.type);
+    var c = sldAdd(ct, SLD_TYPES[ct].label, n.id); S.sld.selected = c.id; sldLayout(false); save(); renderAll();
+  }));
+  acts.appendChild(btn('Delete', function(){
+    if (confirm('Delete "' + n.name + '"? Anything fed from it moves up to its parent.')) sldDelete(n.id);
+  }));
+  head.appendChild(acts);
+  box.appendChild(head);
+  var others = S.sld.nodes.filter(function(o){ return o.id !== n.id; });
+  box.appendChild(gridOf([
+    fText(n,'name','Name'),
+    fSelect(n,'type','Type', Object.keys(SLD_TYPES).map(function(k){ return { v:k, t:SLD_TYPES[k].label }; })),
+    fSelect(n,'parent','Fed from', [{ v:'', t:'— nothing (a source) —' }].concat(others.map(function(o){
+      return { v:o.id, t:o.name + ' (' + (SLD_TYPES[o.type]||SLD_TYPES.load).label + ')' }; }))),
+    fText(n,'rating','Rating','1600 kVA / 250 kW'),
+    fNum(n,'kw','kW'), fNum(n,'kva','kVA'), fNum(n,'pf','PF'),
+    fNum(n,'vthd','% VTHD'), fNum(n,'ithd','% ITHD'),
+    fText(n,'recId','PQ recording ID'),
+    fCheck(n,'provisional','Provisional (walkthrough guess, drawn dashed)')
+  ]));
+  return box;
+}
+
 FORMS.sld = function(w){
   var c = card('Single line diagram',
-    'Built from the hierarchy rather than drawn. Each node carries the measured figures from the same records the tables use; a node breaching IEEE-519 turns red. Drag to adjust — positions persist.');
+    'Built from the hierarchy rather than drawn. Start from the grid, add a transformer, a bus, then the panels and loads fed from each - every node says what feeds it. Click a node to select it; drag to move it; the Delete key removes it. A node breaching IEEE-519 turns red.');
   var bar = el('div','display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;');
   bar.appendChild(btn('Build from panels + transformer', function(){
     if (S.sld.nodes.length && !confirm('Rebuild the diagram from the panel tables? Manual nodes will be lost.')) return;
     sldBuildFromHierarchy(); renderAll();
-  }));
+  }, 'primary'));
   bar.appendChild(btn('Re-layout', function(){ sldLayout(true); save(); renderAll(); }));
+  var sel = S.sld.selected ? sldNode(S.sld.selected) : null;
   Object.keys(SLD_TYPES).forEach(function(t){
     bar.appendChild(btn('+ ' + SLD_TYPES[t].label, function(){
-      var sel = S.sld.nodes.length ? S.sld.nodes[S.sld.nodes.length-1].id : null;
-      sldAdd(t, SLD_TYPES[t].label, sel); sldLayout(false); save(); renderAll();
+      var parent = sel ? sel.id : (S.sld.nodes.length ? S.sld.nodes[S.sld.nodes.length-1].id : null);
+      var n = sldAdd(t, SLD_TYPES[t].label, parent); S.sld.selected = n.id; sldLayout(false); save(); renderAll();
     }));
   });
   c.appendChild(bar);
+  c.appendChild(el('p','', sel ? 'Selected: ' + sel.name + ' — new nodes are fed from it. Press Delete on the drawing to remove it.'
+                               : 'Nothing selected — new nodes are fed from the last node added.')).className = 'callout info';
 
-  var host = el('div'); host.id = 'sldcanvas';
+  var host = el('div','overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px;background:#fff;');
+  host.id = 'sldcanvas';
   var built = sldSvg(false, true);
   host.appendChild(built.svg);
   c.appendChild(host);
   enableSldDrag(built.svg);
   w.appendChild(c);
 
-  var c2 = card('Nodes', 'Rename, re-parent and annotate. Re-parenting is a first-class operation — a machine recorded under Dyeing that turns out to be fed from the CNC panel moves here, and its measurements travel with it.');
-  c2.appendChild(tableEditor(S.sld.nodes, [
-    { k:'name', t:'Name', type:'text' },
-    { k:'type', t:'Type', type:'select', opts:Object.keys(SLD_TYPES) },
-    { k:'parent', t:'Fed from', type:'select',
-      opts:[''].concat(S.sld.nodes.map(function(n){ return n.id; })) },
-    { k:'rating', t:'Rating', type:'text' },
-    { k:'kw', t:'kW', type:'num' }, { k:'kva', t:'kVA', type:'num' },
-    { k:'pf', t:'PF', type:'num' },
-    { k:'vthd', t:'%VTHD', type:'num' }, { k:'ithd', t:'%ITHD', type:'num' },
-    { k:'recId', t:'PQ recording ID', type:'text' },
-    { k:'provisional', t:'Provisional', type:'check', w:'80px' },
-    { t:'id', calc:function(r){ return r.id; } }
-  ], { addLabel:'+ Add node', recalc:true }));
-  c2.appendChild(el('p','','“Fed from” takes a node id — the last column shows each node’s id. Provisional nodes are the ones the walkthrough guessed at; they draw dashed until the main audit confirms them.')).className='callout info';
+  var c2 = card('Nodes', 'One card per node, parents before children. "Fed from" is chosen by name. Deleting a node hands whatever it fed to its own parent, so nothing is orphaned.');
+  if (!S.sld.nodes.length) c2.appendChild(el('p','', 'No nodes yet. Use "Build from panels + transformer", or add a Grid supply above.')).className = 'callout';
+  var order = [], seen = {};
+  var visit = function(n){ if (seen[n.id]) return; seen[n.id] = 1; order.push(n);
+    S.sld.nodes.filter(function(k){ return k.parent === n.id; }).forEach(visit); };
+  S.sld.nodes.filter(function(n){ return !n.parent; }).forEach(visit);
+  S.sld.nodes.forEach(visit);
+  order.forEach(function(n){ c2.appendChild(sldNodeCard(n)); });
   w.appendChild(c2);
 
   var c3 = card('Or use a drawn diagram', 'If you already have an SLD from elsewhere, drop it here and it prints instead of the generated one.');
@@ -198,8 +266,9 @@ function enableSldDrag(svg){
     var box = svg.getBoundingClientRect();
     var vb = svg.viewBox.baseVal;
     var sx = vb.width / box.width, sy = vb.height / box.height;
-    drag = { n:n, ox:(e.clientX - box.left) * sx - n.x, oy:(e.clientY - box.top) * sy - n.y, sx:sx, sy:sy, box:box, g:g };
+    drag = { n:n, ox:(e.clientX - box.left) * sx - n.x, oy:(e.clientY - box.top) * sy - n.y, sx:sx, sy:sy, box:box, g:g, moved:false };
     g.classList.add('sel');
+    svg.focus();
     svg.setPointerCapture(e.pointerId);
     e.preventDefault();
   });
@@ -207,13 +276,29 @@ function enableSldDrag(svg){
     if (!drag) return;
     var x = (e.clientX - drag.box.left) * drag.sx - drag.ox;
     var y = (e.clientY - drag.box.top) * drag.sy - drag.oy;
+    if (Math.abs(x - drag.n.x) > 2 || Math.abs(y - drag.n.y) > 2) drag.moved = true;
     drag.n.x = Math.max(4, Math.round(x)); drag.n.y = Math.max(4, Math.round(y));
     drag.g.setAttribute('transform','translate(' + drag.n.x + ',' + drag.n.y + ')');
   });
   svg.addEventListener('pointerup', function(){
     if (!drag) return;
-    drag.g.classList.remove('sel');
-    drag = null; save(); drawPreview();
+    var moved = drag.moved, id = drag.n.id;
+    drag = null; save();
+    /* A click without a drag selects the node and brings its card into view. */
+    S.sld.selected = id;
+    if (!moved){
+      renderAll();
+      var card = document.getElementById('sldn-' + id);
+      if (card) card.scrollIntoView({ block:'nearest', behavior:'smooth' });
+    } else drawPreview();
+  });
+  svg.tabIndex = 0;
+  svg.style.outline = 'none';
+  svg.addEventListener('keydown', function(e){
+    if ((e.key === 'Delete' || e.key === 'Backspace') && S.sld.selected){
+      var n = sldNode(S.sld.selected);
+      if (n && confirm('Delete "' + n.name + '"?')){ e.preventDefault(); sldDelete(n.id); }
+    }
   });
 }
 
@@ -598,7 +683,7 @@ FORMS.imports = function(w){
       var f = i.files && i.files[0]; if (!f) return;
       readWorkbook(f).then(function(wb){
         var log;
-        try { log = fn(wb); }
+        try { log = fn(wb, f.name); }
         catch (err){ i.value = ''; alert(err.message); return; }
         i.value = '';
         save(); renderAll();
@@ -610,7 +695,7 @@ FORMS.imports = function(w){
     return labelled(label, i, hint);
   };
   c.appendChild(mk('Drop any workbook here', importAny,
-    'JET-Eff, A-CMP or a module workbook \u2014 the file is identified from its own sheet names, ' +
+    'JET-Eff, A-CMP, the FOX KISEM export, a PQ analyser \u201cPostMan export\u201d, or a module workbook \u2014 the file is identified from its own sheet names, ' +
     'and if those were renamed, from its column headers. Only the modules it actually contains are touched.'));
   var note = el('p','','A workbook whose company name differs from this report is flagged, never silently overwritten. Re-importing a module replaces it rather than duplicating rows.');
   note.className = 'callout info';
@@ -1032,7 +1117,21 @@ function workbookCompany(wb){
    plant, then hands it to the readers that apply. Refusing here is the
    whole point: a mismatch is reported and nothing is written, so a report
    can never end up holding another company's measurements by accident. */
-function importAny(wb){
+function importAny(wb, fileName){
+  /* The two measured-data workbooks are recognised before anything else,
+     because their sheets are unmistakable and neither carries the module
+     template's headers. */
+  if (isFoxWorkbook(wb)){
+    var theirsF = workbookCompany(wb), oursF = S.company.name;
+    if (theirsF && oursF && !sameCompany(theirsF, oursF) &&
+        !confirm('DIFFERENT COMPANY\n\nThis FOX workbook is for:\n    ' + theirsF + '\n\nThis report is for:\n    ' + oursF + '\n\nPress Cancel to stop.'))
+      throw new Error('Import cancelled. That workbook belongs to ' + theirsF + ', not to this report.');
+    return importFox(wb, fileName);
+  }
+  var pqSheet = null;
+  Object.keys(wb.Sheets).forEach(function(n){ if (!pqSheet && isPqDataSheet(wb, n)) pqSheet = n; });
+  if (pqSheet) return [importPq(wb, fileName)];
+
   var det = detectWorkbook(wb);
   if (!det.found.length)
     throw new Error('Nothing in this workbook could be identified.\n\nSheets found: ' +

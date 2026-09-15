@@ -145,6 +145,11 @@ function bChart(svg, cap){
 function blk(node, splittable){ return { node:node, split:!!splittable }; }
 function tblBlock(head, rows, opts){
   opts = opts || {};
+  /* A chapter can now print on the strength of its recommendations alone,
+     before any readings have been keyed. Its data tables then have headers
+     and no rows, and a header with nothing under it is not a table - it is
+     a stray line of column names. So an empty table prints as nothing. */
+  if (!rows || !rows.length) return { node:el('div'), split:false };
   return { node:bTable(head, rows, opts), split:true, head:head, rows:rows, opts:opts };
 }
 
@@ -239,9 +244,18 @@ function buildReport(){
       recRows.push([{ v:(MODULE_NAMES[m]||m).toUpperCase(), tone:'head', span:10 }]);
       byModule[m].forEach(function(r){
         idx++;
+        var b = (r.electrical || (r.thermal && r.thermal.length)) ? syncRecoTotals(r) : null;
         var ps = pctSaving(r), roi = roiMonths(r);
-        recRows.push([ idx, r.observation || '—', r.recommendation || '—',
-          inr(num(r.consumption)), r.unit || '', inr(num(r.saving)),
+        /* A recommendation that saves both electricity and fuel lists each
+           quantity in its own unit rather than adding kWh to kg. */
+        var savingCell = inr(num(r.saving)), unitCell = r.unit || '';
+        if (b && b.electrical && b.thermal.length){
+          var parts = [inr(Math.round(b.annualKwh)) + ' kWh'];
+          Object.keys(b.thermalTotals).forEach(function(u){ parts.push(inr(Math.round(b.thermalTotals[u])) + ' ' + u); });
+          savingCell = parts.join(' + '); unitCell = 'per year';
+        }
+        recRows.push([ idx, (r.title ? r.title + ' — ' : '') + (r.observation || '—'), r.recommendation || '—',
+          inr(num(r.consumption)), unitCell, savingCell,
           ps === null ? '—' : fix(ps,1), rupees(num(r.monetary)),
           rupees(num(r.investment)), months(roi) ]);
       });
@@ -281,65 +295,10 @@ function buildReport(){
 
   B.push({ anchor:'production' });
 
-  /* --- Baseline --- */
-  B.push(blk(bH(1,'Baseline of plant energy consumption')));
-  var eRows = S.baseline.elec.filter(function(r){ return r.month; });
-  if (eRows.length){
-    B.push(blk(bH(2,'Baseline of plant energy consumption – electrical')));
-    var eTot = eRows.reduce(function(a,r){ return a + (num(r.kwh)||0); },0);
-    B.push(tblBlock(['Month','kWh','TOE'],
-      eRows.map(function(r){
-        var v = num(r.kwh);
-        return [r.month, inr(v), v === null ? '—' : (v*0.00008598).toFixed(3)];
-      }).concat([[{v:'Total',tone:'head'}, {v:inr(Math.round(eTot)),tone:'head'},
-        {v:(eTot*0.00008598).toFixed(3),tone:'head'}]]),
-      { colw:['34%','33%','33%'] }));
-    B.push(blk(bChart(chartBars(eRows.map(function(r){ return r.month; }),
-      eRows.map(function(r){ return num(r.kwh) || 0; }),
-      'Monthly electrical consumption', 'kWh', SERIES_NAME.electrical),
-      'Purchased units, ' + S.meta.financialYear)));
-  }
-  var tRows = S.baseline.thermal.filter(function(r){ return r.month; });
-  if (tRows.length){
-    B.push(blk(bH(2,'Baseline of plant energy consumption – thermal')));
-    var g = num(S.costs.gcv);
-    B.push(tblBlock(['Month', (S.baseline.thermalName||'Fuel') + ' (' + (S.baseline.thermalUnit||'') + ')','TOE'],
-      tRows.map(function(r){
-        var v = num(r.qty);
-        return [r.month, inr(v,2), (v !== null && g) ? ((v*g)/1e7).toFixed(3) : '—'];
-      }), { colw:['34%','33%','33%'] }));
-    B.push(blk(bChart(chartBars(tRows.map(function(r){ return r.month; }),
-      tRows.map(function(r){ return num(r.qty) || 0; }),
-      'Monthly thermal consumption', S.baseline.thermalUnit || '', SERIES_NAME.thermal),
-      (S.baseline.thermalName || 'Fuel') + ' consumed, ' + S.meta.financialYear)));
-  }
-  if (S.enabled.water && S.baseline.water.length){
-    B.push(blk(bH(1,'Baseline of plant water consumption')));
-    B.push(tblBlock(['Month','Water (m³)','Source'],
-      S.baseline.water.map(function(r){ return [r.month, inr(num(r.m3)), r.source||'']; }),
-      { colw:['34%','33%','33%'] }));
-  }
-
-  B.push({ anchor:'baseline' });
-
-  /* --- GHG --- */
-  B.push(blk(bH(1,'GHG emission accounting')));
-  var elecTotal = S.baseline.elec.reduce(function(a,r){ return a + (num(r.kwh)||0); },0);
-  var fuelTotal = S.baseline.thermal.reduce(function(a,r){ return a + (num(r.qty)||0); },0);
-  var s2 = (elecTotal/1000) * (num(S.costs.gridEF)||0);
-  var s1 = fuelTotal * (num(S.costs.fuelEF)||0) / 1000;
-  B.push(blk(bH(2,'Boundaries of the emissions accounting')));
-  B.push(blk(bP('Emissions accounting covers Scope 1 (direct, stationary combustion) and Scope 2 (indirect, purchased electricity). ' +
-    (S.ghg.scope3Note || 'Scope 3 activity data was not available for this assessment and is excluded.'))));
-  B.push(blk(bP('Scope 2 uses ' + S.costs.gridSrc + '. Scope 1 uses ' + S.costs.fuelSrc + '. Both factor versions are pinned into this report.', { size:9.5 })));
-  B.push(blk(bH(2,'Summary of GHG emissions')));
-  B.push(tblBlock(['Scope','Type of emission','Source','Emission tCO₂e'], [
-    ['Scope 1','Stationary combustion', S.baseline.thermalName || 'Fuel', fix(s1)],
-    ['Scope 2','Purchased electricity','Grid', fix(s2)],
-    [{v:'Total',tone:'head'},{v:'',tone:'head'},{v:'',tone:'head'},{v:fix(s1+s2),tone:'head'}]
-  ], { colw:['15%','35%','25%','25%'] }));
-
-  B.push({ anchor:'ghg' });
+  /* --- Baseline, water and GHG - all from the one set of monthly figures --- */
+  buildBaselineSection(B);
+  buildWaterSection(B);
+  buildGhgSection(B);
 
   /* --- Bills --- */
   buildBillSection(B);
@@ -371,6 +330,8 @@ function buildReport(){
       { colw:['8%','44%','18%','20%','10%'] }));
   }
   B.push({ anchor:'end' });
+  /* Measurement charts for every PQ recording, after everything else. */
+  buildPqAnnexure(B);
   return B;
 }
 

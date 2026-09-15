@@ -101,7 +101,7 @@ FORMS.certificate = function(w){
   c.appendChild(el('p','','Every figure in this paragraph is read from the Recommendation Ledger. Nothing here is typed, which is exactly why the Certificate and the Executive Summary can no longer disagree.')).className='hint';
   c.appendChild(k);
   if (t.draft) c.appendChild(el('p','', t.draft + ' of ' + t.count +
-    ' recommendations are still marked draft. Verify them in the ledger before the report goes out.')).className='callout';
+    ' recommendations are still marked draft. Verify them on their chapters before the report goes out.')).className='callout';
   else if (t.count) c.appendChild(el('p','', 'All ' + t.count + ' recommendations verified.')).className='callout good';
   w.appendChild(c);
 
@@ -130,77 +130,43 @@ FORMS.summary = function(w){
     k.appendChild(d);
   });
   c.appendChild(k);
-  c.appendChild(el('p','','Add or edit the underlying rows in the Recommendation Ledger.')).className='callout info';
+  c.appendChild(el('p','','Recommendations are added and edited on the chapter they belong to — the electricity bill and each utility.')).className='callout info';
   w.appendChild(c);
 };
 
 /* ---------------- Recommendation ledger ---------------- */
-var MODULE_NAMES = { bills:'Electricity bill', dist:'Electrical distribution', tr:'Transformer / PQ',
+/* The chapters that carry recommendations: the electricity bill and every
+   utility, in report order. Distribution and transformer keep their names
+   so rows written for them in older drafts still print, but they are not
+   offered as a place to add new ones. */
+var MODULE_NAMES = { bills:'Electricity bill',
   boiler:'Boiler', tfh:'Thermic fluid heater', compressor:'Air compressor',
   coolingTower:'Cooling tower', chiller:'Chiller', pumps:'Pumping system',
-  jets:'Jet machines', lux:'Lighting', solar:'Solar', machines:'Machine monitoring', other:'Other' };
+  jets:'Jet machines', lux:'Lighting', solar:'Solar', earth:'Earth loop resistance',
+  machines:'Machine monitoring', sop:'Guidelines / SOP',
+  dist:'Electrical distribution', tr:'Transformer / PQ', other:'Other' };
+var RECO_CHAPTERS = ['bills','boiler','tfh','compressor','coolingTower','chiller','pumps',
+  'jets','lux','solar','earth','machines','sop'];
 
 FORMS.ledger = function(w){
   var c = card('Recommendation ledger',
-    'One row per recommendation. The Certificate, the Executive Summary, the savings table and each module’s “Recommendation in …” heading are all templates over this list — so a figure entered once appears everywhere and can never disagree with itself.');
-  var add = btn('+ Add recommendation', function(){
-    S.ledger.push({ id:uid(), module:'other', observation:'', recommendation:'',
-      type:'electrical', consumption:null, unit:'kWh/yr', saving:null,
-      monetary:null, investment:null, co2:null, priority:'medium', actionBy:'Plant', status:'draft' });
-    save(); renderAll();
-  });
-  c.appendChild(add);
+    'Every recommendation in the report, grouped by the chapter it belongs to. Each one prints at the end of its chapter with its title, observation, recommendation, any photographs or tables, and its benefit worked out in the open. The Certificate, the Executive Summary and the savings table are all read from here.');
+  var t = rollUp(S.ledger);
+  c.appendChild(el('p','', S.ledger.length
+    ? S.ledger.length + ' recommendation' + (S.ledger.length === 1 ? '' : 's') + ' · ' + rupees(t.moneyTotal) + ' a year · payback ' + months(t.roi)
+    : 'No recommendations yet. Add one under the chapter it belongs to.')).className = 'callout info';
   w.appendChild(c);
 
-  S.ledger.forEach(function(r, idx){
-    var box = el('div'); box.className = 'rec ' + r.type;
-    var h = el('h4');
-    h.appendChild(document.createTextNode((idx+1) + '. ' + (MODULE_NAMES[r.module] || 'Other')));
-    var pill = el('span','', r.status === 'verified' ? 'verified' : 'draft');
-    pill.className = 'pill ' + (r.status === 'verified' ? 'ok' : 'draft');
-    h.appendChild(pill);
-    var roi = roiMonths(r), ps = pctSaving(r);
-    h.appendChild(el('span','margin-left:auto;font-family:'+F.mono+';font-size:11px;color:var(--ink-3)',
-      rupees(num(r.monetary)) + ' · ' + months(roi)));
-    h.style.display = 'flex';
-    box.appendChild(h);
-
-    box.appendChild(gridOf([
-      fSelect(r,'module','Module', Object.keys(MODULE_NAMES).map(function(k){ return {v:k,t:MODULE_NAMES[k]}; })),
-      fSelect(r,'type','Energy type', [{v:'electrical',t:'Electrical'},{v:'thermal',t:'Thermal'},{v:'water',t:'Water'}]),
-      fSelect(r,'status','Status', [{v:'draft',t:'Draft'},{v:'verified',t:'Verified'}]),
-      fSelect(r,'priority','Priority', ['critical','high','medium','low']),
-      fText(r,'actionBy','Action by','Plant / Vendor')
-    ], true));
-    box.appendChild(fArea(r,'observation','Observation','What was measured and what it means.'));
-    box.appendChild(fArea(r,'recommendation','Recommendation','What to do, and what it will change.'));
-    box.appendChild(gridOf([
-      fNum(r,'consumption','Annual consumption'),
-      fText(r,'unit','Unit','kWh/yr'),
-      fNum(r,'saving','Annual saving', null, ps === null ? '' : pct(ps) + ' of consumption'),
-      fNum(r,'monetary','Monetary saving ₹/yr'),
-      fNum(r,'investment','Investment ₹'),
-      fNum(r,'co2','CO₂ reduction tCO₂e')
-    ]));
-    var bar = el('div','display:flex;gap:8px;margin-top:10px;');
-    bar.appendChild(btn('Estimate ₹ from saving', function(){
-      var rate = num(S.costs.unitRate), fc = num(S.costs.fuelCost);
-      if (r.type === 'electrical' && rate && num(r.saving)) r.monetary = Math.round(num(r.saving) * rate);
-      else if (r.type === 'thermal' && fc && num(r.saving)) r.monetary = Math.round(num(r.saving) * fc / (S.costs.fuelUnit === 'tonne' ? 1000 : 1));
-      else { alert('Set the unit rate or fuel cost in the Cost register first.'); return; }
-      save(); renderAll();
-    }));
-    bar.appendChild(btn('Estimate CO₂', function(){
-      var ef = num(S.costs.gridEF);
-      if (r.type === 'electrical' && ef && num(r.saving)) r.co2 = +( (num(r.saving)/1000) * ef ).toFixed(2);
-      else { alert('CO₂ estimate needs an electrical saving and a grid emission factor.'); return; }
-      save(); renderAll();
-    }));
-    bar.appendChild(btn('Delete', function(){
-      S.ledger.splice(idx,1); save(); renderAll();
-    }));
-    box.appendChild(bar);
-    w.appendChild(box);
+  /* Chapters in report order; a chapter with recommendations always shows,
+     an empty utility chapter only if it is switched on for this report. */
+  /* The offered chapters first; any legacy chapter only if it has rows. */
+  var order = RECO_CHAPTERS.concat(Object.keys(MODULE_NAMES).filter(function(k){ return RECO_CHAPTERS.indexOf(k) < 0; }));
+  order.forEach(function(mid){
+    var sec = sectionById(mid);
+    var has = S.ledger.some(function(r){ return r.module === mid; });
+    if (!has && RECO_CHAPTERS.indexOf(mid) < 0) return;
+    if (!has && sec && sec.opt && !S.enabled[sec.opt]) return;
+    chapterRecoCard(w, mid, { showModule:true });
   });
 };
 
@@ -236,238 +202,61 @@ FORMS.production = function(w){
   w.appendChild(c4);
 };
 
-/* ---------------- Energy baseline ---------------- */
-FORMS.baseline = function(w){
-  var c = card('Electrical baseline',
-    'Twelve months of purchased units. This table feeds the baseline section, the GHG Scope-2 calculation and the bill analysis denominators.');
-  var fillBtn = btn('Fill months from FY ' + S.meta.financialYear, function(){
-    fillMonths(S.baseline.elec, S.meta.financialYear, 'kwh'); save(); renderAll();
-  });
-  var pullBtn = btn('Pull kWh from bills', function(){
-    if (!S.bills.length){ alert('No bills entered yet.'); return; }
-    S.baseline.elec = S.bills.map(function(b){ return { month:b.month, kwh:num(b.kwh) }; });
-    save(); renderAll();
-  });
-  c.appendChild(tableEditor(S.baseline.elec, [
-    { k:'month', t:'Month', type:'text', w:'110px' },
-    { k:'kwh', t:'kWh', type:'num' },
-    { t:'TOE', calc:function(r){ var v = num(r.kwh); return v === null ? '—' : (v * 0.00008598).toFixed(3); } }
-  ], { addLabel:'+ Add month', recalc:true, extraButtons:[fillBtn, pullBtn] }));
-  var te = S.baseline.elec.reduce(function(a,r){ return a + (num(r.kwh)||0); }, 0);
-  c.appendChild(el('p','', 'Annual: ' + inr(Math.round(te)) + ' kWh = ' + (te*0.00008598).toFixed(2) + ' TOE.'))
-    .className = 'callout info';
-  w.appendChild(c);
-
-  var c2 = card('Thermal baseline', 'Fuel consumed over the same twelve months.');
-  c2.appendChild(gridOf([
-    fText(S.baseline,'thermalName','Fuel','LDO / Coal / Natural gas'),
-    fSelect(S.baseline,'thermalUnit','Unit', ['Litre','kg','Tonne','SCM'])
-  ]));
-  var fillT = btn('Fill months from FY', function(){
-    fillMonths(S.baseline.thermal, S.meta.financialYear, 'qty'); save(); renderAll();
-  });
-  c2.appendChild(tableEditor(S.baseline.thermal, [
-    { k:'month', t:'Month', type:'text', w:'110px' },
-    { k:'qty', t:'Quantity', type:'num' },
-    { t:'TOE', calc:function(r){
-        var v = num(r.qty), g = num(S.costs.gcv);
-        if (v === null || !g) return '—';
-        return ((v * g) / 1e7).toFixed(3);
-      } }
-  ], { addLabel:'+ Add month', recalc:true, extraButtons:[fillT] }));
-  c2.appendChild(el('p','','TOE uses the GCV in the Cost register (1 TOE = 10⁷ kcal). Set it there and every thermal figure follows.')).className='callout info';
-  w.appendChild(c2);
-};
-
-FORMS.water = function(w){
-  var c = card('Water baseline', 'Monthly water drawn, as in the Shree Mahadev report.');
-  var fillW = btn('Fill months from FY', function(){
-    fillMonths(S.baseline.water, S.meta.financialYear, 'm3'); save(); renderAll();
-  });
-  c.appendChild(tableEditor(S.baseline.water, [
-    { k:'month', t:'Month', type:'text', w:'110px' },
-    { k:'m3', t:'Water (m³)', type:'num' },
-    { k:'source', t:'Source', type:'text', ph:'Borewell / municipal' }
-  ], { addLabel:'+ Add month', extraButtons:[fillW] }));
-  w.appendChild(c);
-};
+/* Energy and water baseline forms live in p17_baseline.js. */
 
 /* ---------------- GHG ---------------- */
 FORMS.ghg = function(w){
+  var g = baselineGhg();
   var c = card('GHG emission accounting',
-    'Scope 1 and Scope 2 are computed from the baseline tables and the emission factors in the Cost register. The factor version is pinned into the report so an old report stays reproducible.');
-  var elec = S.baseline.elec.reduce(function(a,r){ return a + (num(r.kwh)||0); }, 0);
-  var fuel = S.baseline.thermal.reduce(function(a,r){ return a + (num(r.qty)||0); }, 0);
-  var s2 = (elec/1000) * (num(S.costs.gridEF)||0);
-  var s1 = fuel * (num(S.costs.fuelEF)||0) / 1000;
+    'Scope 1 and Scope 2 are computed from the baseline - one emission factor per fuel, set on the Energy baseline screen - and the grid factor below. The narrative that opens the chapter is standing text; only the figures in it change.');
   var k = el('div'); k.className='kpis';
-  [['Scope 1', fix(s1) + ' tCO₂e'], ['Scope 2', fix(s2) + ' tCO₂e'],
-   ['Total', fix(s1+s2) + ' tCO₂e']].forEach(function(p){
+  var mob = mobileEmission();
+  [['Scope 1 stationary', fix(g.s1) + ' tCO₂e'], ['Scope 1 mobile', fix(mob) + ' tCO₂e'],
+   ['Scope 2 gross', fix(g.s2) + ' tCO₂e'], ['Scope 2 net', fix(g.s2 - (num(S.ghg.reOffset)||0)) + ' tCO₂e'],
+   ['Total', fix(g.s1 + mob + g.s2 - (num(S.ghg.reOffset)||0)) + ' tCO₂e']].forEach(function(p){
     var d = el('div'); d.className='kpi';
     d.appendChild(el('span','', p[0])).className='k';
     d.appendChild(el('span','', p[1])).className='v';
     k.appendChild(d);
   });
   c.appendChild(k);
-  c.appendChild(gridOf([
-    fNum(S.costs,'gridEF','Grid factor tCO₂/MWh'),
+  var fuelFields = (S.baseline.fuels || []).map(function(f){
+    return fNum(f,'ef','Emission factor — ' + f.name + ' (kgCO₂e per ' + f.unit + ')', '',
+      'Applied to every month of ' + f.name.toLowerCase() + ' in the Scope 1 table. DEFRA 2025: coal ~2,402/ton, diesel 2.66/L, PNG 2.02/SCM.');
+  });
+  if (!fuelFields.length) c.appendChild(el('p','', 'No fuels yet — add them on the Energy baseline screen and their emission factors will be asked here.')).className = 'callout';
+  c.appendChild(gridOf(fuelFields.concat([
+    fNum(S.costs,'gridEF','Emission factor — grid electricity (kgCO₂e per kWh)', '0.716', 'Applied to every month of Grid Input Energy in the Scope 2 table. CEA v21.0: 0.716.'),
     fText(S.costs,'gridSrc','Grid factor source'),
-    fNum(S.costs,'fuelEF','Fuel factor kgCO₂e per ' + (S.baseline.thermalUnit||'unit')),
-    fText(S.costs,'fuelSrc','Fuel factor source')
+    fText(S.costs,'fuelSrc','Fuel factor source'),
+    fText(S.ghg,'meterName','Electricity metered by','ABT meter'),
+    fText(S.ghg,'site','Plant premises named in the boundary','Palsana GIDC', 'Blank uses the address line 2 from the cover.')
+  ]), true));
+  w.appendChild(c);
+
+  var c2 = card('Mobile combustion (Scope 1)', 'Fuel burnt in vehicles and mobile equipment on site. Leave the quantity blank if there is none.');
+  c2.appendChild(gridOf([
+    fText(S.ghg,'mobileFuel','Fuel','Diesel'),
+    fNum(S.ghg,'mobileQty','Quantity in the period'),
+    fSelect(S.ghg,'mobileUnit','Unit', ['Litre','kg','SCM']),
+    fNum(S.ghg,'mobileEf','Emission factor kgCO₂e per unit', '2.66')
   ], true));
-  c.appendChild(fArea(S.ghg,'scope3Note','Scope 3 note',
-    'Why Scope 3 was excluded, if it was.'));
-  w.appendChild(c);
-};
-
-/* ---------------- Electricity bills ---------------- */
-FORMS.bills = function(w){
-  var c = card('Twelve months of bills',
-    'These rows produce the baseline, the whole bill-analysis section and two of the report’s recommendations. Arithmetic checks run on every row: a red cell means the bill does not add up, which is sometimes worth a line in the report.');
-  var fillB = btn('Create 12 months from FY', function(){
-    var labels = fyMonths(S.meta.financialYear);
-    S.bills = labels.map(function(l){
-      return { month:l, contract:null, actualMD:null, billingDemand:null, kwh:null, kvah:null,
-               pf:null, energyCharge:null, demandCharge:null, fuelSurcharge:null, duty:null,
-               other:null, rebate:null, net:null, todNight:null, todPeak:null };
-    });
-    save(); renderAll();
-  });
-  var chk = function(b){
-    var parts = ['energyCharge','demandCharge','fuelSurcharge','duty','other'].reduce(function(a,k){ return a + (num(b[k])||0); }, 0)
-      - (num(b.rebate)||0);
-    var net = num(b.net);
-    if (net === null || parts === 0) return '—';
-    var diff = Math.abs(parts - net);
-    return diff <= 5 ? 'ok' : ('off by ' + inr(Math.round(diff)));
-  };
-  var pfCalc = function(b){
-    var kwh = num(b.kwh), kvah = num(b.kvah);
-    if (!kwh || !kvah) return '—';
-    return (kwh/kvah).toFixed(3);
-  };
-  c.appendChild(tableEditor(S.bills, [
-    { k:'month', t:'Month', type:'text', w:'96px' },
-    { k:'contract', t:'CD kVA', type:'num' },
-    { k:'actualMD', t:'Actual MD', type:'num' },
-    { k:'billingDemand', t:'Billing dmd', type:'num' },
-    { k:'kwh', t:'kWh', type:'num' },
-    { k:'kvah', t:'kVAh', type:'num' },
-    { k:'pf', t:'PF (bill)', type:'num' },
-    { t:'PF calc', calc:pfCalc },
-    { k:'energyCharge', t:'Energy ₹', type:'num' },
-    { k:'demandCharge', t:'Demand ₹', type:'num' },
-    { k:'fuelSurcharge', t:'FPPPA ₹', type:'num' },
-    { k:'duty', t:'Duty ₹', type:'num' },
-    { k:'other', t:'Other ₹', type:'num' },
-    { k:'rebate', t:'Rebate ₹', type:'num' },
-    { k:'net', t:'Net ₹', type:'num' },
-    { t:'Check', calc:chk },
-    { k:'todNight', t:'Night kWh', type:'num' },
-    { k:'todPeak', t:'Peak kWh', type:'num' }
-  ], { addLabel:'+ Add bill month', recalc:true, extraButtons:[fillB] }));
-  w.appendChild(c);
-
-  var d = billDerived();
-  var c2 = card('Derived from the bills', 'Load factor, plant utility factor and demand factor are computed exactly as the sample reports state them.');
-  var k = el('div'); k.className='kpis';
-  [['Avg units/month', inr(Math.round(d.avgKwh))],
-   ['Avg actual MD', fix(d.avgMD) + ' kVA'],
-   ['Avg PF', fix(d.avgPF,3)],
-   ['Load factor', fix(d.loadFactor,3)],
-   ['Plant utility factor', fix(d.utilityFactor,3)],
-   ['Demand factor', fix(d.demandFactor,3)],
-   ['Blended rate', d.blended === null ? '—' : '₹ ' + fix(d.blended,2) + '/kWh'],
-   ['Night share', pct(d.nightShare)]].forEach(function(p){
-    var x = el('div'); x.className='kpi';
-    x.appendChild(el('span','', p[0])).className='k';
-    x.appendChild(el('span','', p[1])).className='v';
-    k.appendChild(x);
-  });
-  c2.appendChild(k);
-  c2.appendChild(fArea(S.billNotes,'pfNote','Power factor observation'));
-  c2.appendChild(fArea(S.billNotes,'cdNote','Contract demand observation'));
   w.appendChild(c2);
+
+  var c3 = card('Renewable purchase offset (Scope 2)', 'Electricity bought from renewable sources reduces the net Scope 2 figure. Leave blank if none.');
+  c3.appendChild(gridOf([
+    fNum(S.ghg,'reOffset','Offset tCO₂e in the period'),
+    fText(S.ghg,'reOffsetSince','Offset applies from','April 2025'),
+    fText(S.ghg,'inventoryLink','Detailed inventory workbook','Mahadev Silk Mills Surat_ GHG Emission Account.xlsx', 'Named at the end of the boundary text.')
+  ], true));
+  c3.appendChild(fArea(S.ghg,'scope3Note','Scope 3 note', 'Why Scope 3 was excluded, if it was.'));
+  w.appendChild(c3);
 };
 
-function billDerived(){
-  var b = S.bills.filter(function(r){ return num(r.kwh); });
-  var n = b.length || 1;
-  var avgKwh = b.reduce(function(a,r){ return a + (num(r.kwh)||0); },0) / n;
-  var avgMD = b.reduce(function(a,r){ return a + (num(r.actualMD)||0); },0) / n;
-  var pfs = b.map(function(r){
-    var p = num(r.pf); if (p) return p;
-    var kwh = num(r.kwh), kvah = num(r.kvah);
-    return (kwh && kvah) ? kwh/kvah : null;
-  }).filter(function(x){ return x !== null; });
-  var avgPF = pfs.length ? pfs.reduce(function(a,c){ return a+c; },0)/pfs.length : null;
-  var cd = b.length ? (num(b[b.length-1].contract) || num(b[0].contract)) : null;
-  var loadFactor = (avgMD && avgPF) ? avgKwh / (avgMD * avgPF * 24 * 30) : null;
-  var utilityFactor = (cd && avgPF) ? avgKwh / (cd * avgPF * 24 * 30) : null;
-  var demandFactor = cd ? avgMD / cd : null;
-  var totalNet = b.reduce(function(a,r){ return a + (num(r.net)||0); },0);
-  var totalKwh = b.reduce(function(a,r){ return a + (num(r.kwh)||0); },0);
-  var blended = totalKwh ? totalNet/totalKwh : null;
-  var night = b.reduce(function(a,r){ return a + (num(r.todNight)||0); },0);
-  var nightShare = totalKwh ? (night/totalKwh)*100 : null;
-  var maxMD = b.reduce(function(a,r){ return Math.max(a, num(r.actualMD)||0); },0);
-  return { rows:b, avgKwh:avgKwh, avgMD:avgMD, avgPF:avgPF, cd:cd, maxMD:maxMD,
-           loadFactor:loadFactor, utilityFactor:utilityFactor, demandFactor:demandFactor,
-           blended:blended, nightShare:nightShare, totalKwh:totalKwh, totalNet:totalNet };
-}
+/* The electricity bill form and billDerived() live in p18_ebill.js. */
 
 /* ---------------- Electrical distribution ---------------- */
-FORMS.dist = function(w){
-  var c = card('Plant load demand study', 'From the analyser recording on the incomer.');
-  c.appendChild(gridOf([
-    fNum(S.dist.demand,'contract','Contract demand kVA'),
-    fNum(S.dist.demand,'avg','Average kVA'),
-    fNum(S.dist.demand,'min','Minimum kVA'),
-    fNum(S.dist.demand,'max','Maximum kVA'),
-    fText(S.dist.demand,'window','Recording window','9 Jun 2026 10:06 to 10 Jun 2026 01:52 (27 hrs)')
-  ]));
-  w.appendChild(c);
-
-  var c2 = card('Section-wise PCC load', 'Imported from JET-Eff, or typed here.');
-  c2.appendChild(tableEditor(S.dist.pcc, [
-    { k:'name', t:'Name of machine / panel', type:'text' },
-    { k:'v', t:'Voltage', type:'num' }, { k:'i', t:'Current', type:'num' },
-    { k:'kw', t:'kW', type:'num' }, { k:'kvar', t:'Q kVAr', type:'num' },
-    { k:'kva', t:'kVA', type:'num' }, { k:'pf', t:'PF', type:'num' },
-    { k:'vthd', t:'%V THD', type:'num' }, { k:'ithd', t:'%I THD', type:'num' }
-  ], { addLabel:'+ Add panel' }));
-  w.appendChild(c2);
-
-  var c3 = card('Motor load study',
-    '% load is computed, and anything above 100 % is flagged red in the report — an overloaded motor is a finding, not a formatting choice.');
-  c3.appendChild(tableEditor(S.dist.motors, [
-    { k:'sr', t:'S.No', type:'num', w:'56px' },
-    { k:'name', t:'Name', type:'text' },
-    { k:'rated', t:'Rated kW', type:'num' },
-    { k:'starter', t:'Starter', type:'select', opts:['DOL','SD','VFD'] },
-    { k:'freq', t:'Freq/rpm', type:'num' },
-    { k:'v', t:'Voltage', type:'num' }, { k:'i', t:'Current', type:'num' },
-    { k:'kw', t:'kW', type:'num' }, { k:'kvar', t:'kVAr', type:'num' },
-    { k:'kva', t:'kVA', type:'num' }, { k:'pf', t:'PF', type:'num' },
-    { t:'% Load', calc:function(r){
-        var kw = num(r.kw), rated = num(r.rated);
-        return (kw && rated) ? ((kw/rated)*100).toFixed(1) : '—';
-      } }
-  ], { addLabel:'+ Add motor', recalc:true }));
-  c3.appendChild(fArea(S.dist,'motorNote','Observation in motor load'));
-  w.appendChild(c3);
-
-  var c4 = card('Automatic power factor correction study');
-  c4.appendChild(tableEditor(S.dist.apfc, [
-    { k:'stage', t:'Stage', type:'text', w:'80px' },
-    { k:'rated', t:'Rated kVAr', type:'num' },
-    { k:'v', t:'Voltage', type:'num' },
-    { k:'ir', t:'I-R', type:'num' }, { k:'iy', t:'I-Y', type:'num' }, { k:'ib', t:'I-B', type:'num' },
-    { k:'remark', t:'Remark', type:'text', ph:'Healthy / derated' }
-  ], { addLabel:'+ Add stage' }));
-  c4.appendChild(fArea(S.dist,'apfcNote','Observation in APFC'));
-  w.appendChild(c4);
-};
+/* FORMS.dist lives in p19_pq.js. */
 
 /* ---------------- Transformer & PQ ---------------- */
 FORMS.tr = function(w){

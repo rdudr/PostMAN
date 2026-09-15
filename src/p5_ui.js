@@ -150,6 +150,10 @@ function tableEditor(rows, cols, opts){
       if (c.calc){
         td.className = 'calc';
         td.textContent = c.calc(row, idx);
+      } else if (c.type === 'month'){
+        /* Month and year from menus, so a month can never be spelt two
+           ways across the bills, the baseline and the modules. */
+        td.appendChild(monthLabelPicker(row, c.k, opts.recalc ? function(){ recalcCells(t, rows, cols); drawPreview(); } : null));
       } else if (c.type === 'select'){
         var s = el('select');
         c.opts.forEach(function(o){ var op = el('option','', o); op.value = o; s.appendChild(op); });

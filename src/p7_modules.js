@@ -350,7 +350,7 @@ FORMS.solar = function(w){
   var c = card('Solar plant monitoring');
   c.appendChild(gridOf([ fNum(S.solar,'capacity','Installed capacity kWp') ]));
   c.appendChild(tableEditor(S.solar.rows, [
-    { k:'month', t:'Month', type:'text', w:'110px' },
+    { k:'month', t:'Month', type:'month', w:'150px' },
     { k:'gen', t:'Generation kWh', type:'num' },
     { k:'irr', t:'Irradiance kWh/m²', type:'num' },
     { t:'CUF %', calc:function(r){

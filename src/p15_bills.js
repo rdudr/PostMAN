@@ -17,23 +17,42 @@
    =================================================================== */
 
 var BILL_FIELDS = [
-  { k:'month',        t:'Billing month',     type:'text' },
+  /* The nine yellow cells of the workbook - what the report actually needs. */
+  { k:'month',        t:'Billing month',     type:'text', yellow:true },
+  { k:'kwh',          t:'Total units consumed', unit:'kWh', yellow:true },
+  { k:'net',          t:'Total bill amount', unit:'₹', yellow:true },
+  { k:'pf',           t:'Power factor',      unit:'', yellow:true },
+  { k:'actualMD',     t:'Actual maximum demand', unit:'kVA', yellow:true },
+  { k:'energyRate',   t:'Energy charge rate', unit:'₹/kWh', yellow:true, derived:'energy charge ÷ units' },
+  { k:'fppaRate',     t:'FPPA rate',         unit:'₹/kWh', yellow:true, derived:'fuel surcharge ÷ units' },
+  { k:'todNight',     t:'Night units',       unit:'kWh', yellow:true },
+  { k:'todPeak',      t:'TOU units',         unit:'kWh', yellow:true },
+  /* Also read, for the tariff header and for cross-checking the computed columns. */
   { k:'contract',     t:'Contract demand',   unit:'kVA' },
-  { k:'actualMD',     t:'Actual maximum demand', unit:'kVA' },
-  { k:'billingDemand',t:'Billing demand',    unit:'kVA' },
-  { k:'kwh',          t:'Units consumed',    unit:'kWh' },
+  { k:'billingDemand',t:'Billing demand (as billed)', unit:'kVA' },
   { k:'kvah',         t:'Apparent energy',   unit:'kVAh' },
-  { k:'pf',           t:'Power factor',      unit:'' },
-  { k:'energyCharge', t:'Energy charge',     unit:'₹' },
-  { k:'demandCharge', t:'Demand charge',     unit:'₹' },
-  { k:'fuelSurcharge',t:'Fuel surcharge (FPPPA)', unit:'₹' },
-  { k:'duty',         t:'Electricity duty',  unit:'₹' },
-  { k:'other',        t:'Other charges',     unit:'₹' },
+  { k:'energyCharge', t:'Energy charge (as billed)', unit:'₹' },
+  { k:'demandCharge', t:'Demand charge (as billed)', unit:'₹' },
+  { k:'fuelSurcharge',t:'Fuel surcharge (as billed)', unit:'₹' },
+  { k:'duty',         t:'Electricity duty (as billed)', unit:'₹' },
   { k:'rebate',       t:'Rebate / discount', unit:'₹' },
-  { k:'net',          t:'Net payable',       unit:'₹' },
-  { k:'todNight',     t:'TOD night units',   unit:'kWh' },
-  { k:'todPeak',      t:'TOD peak units',    unit:'kWh' }
+  { k:'other',        t:'Other charges',     unit:'₹' }
 ];
+
+/* The two rates are rarely printed as such; a bill prints the charge. When
+   the charge and the units were both found, the rate follows, and is marked
+   as derived so the checker knows it was not read off the page. */
+function addDerivedRateHits(hits){
+  if (!hits) return hits;
+  var kwh = hits.kwh && num(hits.kwh.value);
+  if (kwh){
+    if (!hits.energyRate && hits.energyCharge && num(hits.energyCharge.value) !== null)
+      hits.energyRate = { value:+(num(hits.energyCharge.value) / kwh).toFixed(2), via:'derived', line:'energy charge ' + hits.energyCharge.value + ' ÷ ' + kwh + ' kWh', note:'Derived, not printed' };
+    if (!hits.fppaRate && hits.fuelSurcharge && num(hits.fuelSurcharge.value) !== null)
+      hits.fppaRate = { value:+(num(hits.fuelSurcharge.value) / kwh).toFixed(2), via:'derived', line:'fuel surcharge ' + hits.fuelSurcharge.value + ' ÷ ' + kwh + ' kWh', note:'Derived, not printed' };
+  }
+  return hits;
+}
 
 /* Label aliases, longest and most specific first: "billing demand" must be
    tried before "demand", or every bill reports its contract demand as its
@@ -460,7 +479,7 @@ function ingestBillImage(file, onPage){
    text gave one, so re-uploading a clearer scan of March updates March
    rather than adding a fourteenth month. */
 function attachPage(page){
-  var hits = extractBill(page.tokens && page.tokens.length ? page.tokens : page.text);
+  var hits = addDerivedRateHits(extractBill(page.tokens && page.tokens.length ? page.tokens : page.text));
   var row = null;
   if (hits.month){
     for (var i = 0; i < S.bills.length; i++){
@@ -568,7 +587,7 @@ function runOcrOn(row, statusFn){
                  w:(b.x1-b.x0)*k, h:(b.y1-b.y0)*k, conf:w.confidence };
       });
     row.ocrSource = 'ocr';
-    row.hits = extractBill(row.tokens.length ? row.tokens : row.ocr);
+    row.hits = addDerivedRateHits(extractBill(row.tokens.length ? row.tokens : row.ocr));
     var n = applyHits(row, false);
     statusFn('');
     return n;
@@ -687,8 +706,12 @@ FORMS.verify = function(w){
 
   BILL_FIELDS.forEach(function(f){
     var row = el('div','display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;');
-    var fieldNode = f.type === 'text' ? fText(b, f.k, f.t) : fNum(b, f.k, f.t + (f.unit ? ', ' + f.unit : ''));
+    var fieldNode = f.k === 'month' ? labelled(f.t, monthLabelPicker(b, 'month'))
+                  : f.type === 'text' ? fText(b, f.k, f.t) : fNum(b, f.k, f.t + (f.unit ? ', ' + f.unit : ''));
     fieldNode.style.flex = '1 1 auto';
+    /* The yellow cells of the workbook are yellow here too: these nine are
+       what the report is built from; the rest only cross-check them. */
+    if (f.yellow){ var yi = fieldNode.querySelector('input,select'); if (yi) yi.style.background = 'var(--warn-soft)'; }
     row.appendChild(fieldNode);
 
     /* Whichever field was last focused is where a box-read lands. */

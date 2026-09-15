@@ -2,142 +2,14 @@
    The three heaviest report sections, plus the utility modules.
    =================================================================== */
 
-function buildBillSection(B){
-  var d = billDerived();
-  if (!d.rows.length) return;
-  B.push(blk(bH(1,'Electricity bill analysis')));
-  B.push(blk(bH(2,'Plant electricity bill analysis')));
-  B.push(tblBlock(['Month','CD kVA','Actual MD','Billing dmd','kWh','kVAh','PF','Net ₹'],
-    d.rows.map(function(r){
-      var pf = num(r.pf) || (num(r.kwh) && num(r.kvah) ? num(r.kwh)/num(r.kvah) : null);
-      return [r.month, inr(num(r.contract)), inr(num(r.actualMD)), inr(num(r.billingDemand)),
-        inr(num(r.kwh)), inr(num(r.kvah)),
-        { v: pf === null ? '—' : fix(pf,3), tone: (pf !== null && pf < 0.95) ? 'bad' : null },
-        inr(num(r.net))];
-    }), { colw:['13%','10%','12%','12%','14%','14%','9%','16%'] }));
+/* buildBillSection lives in p18_ebill.js. */
 
-  B.push(blk(bP('Observations in electricity bills', { bold:true })));
-  B.push(blk(bFormula([
-    'Average units consumed          = ' + inr(Math.round(d.avgKwh)) + ' units/month',
-    'Average actual maximum demand   = ' + fix(d.avgMD) + ' kVA',
-    'Average power factor            = ' + fix(d.avgPF,3),
-    'Contract demand                 = ' + inr(d.cd) + ' kVA',
-    '',
-    'Load factor    = avg kWh / (avg MD x avg PF x 24 x 30) = ' + fix(d.loadFactor,3),
-    'Plant utility  = avg kWh / (CD x avg PF x 24 x 30)     = ' + fix(d.utilityFactor,3),
-    'Demand factor  = avg actual MD / CD                    = ' + fix(d.demandFactor,3)
-  ])));
-  B.push(blk(bP('The higher the load factor, the better the utilisation of the equipment and installed capacity.')));
-
-  B.push(blk(bH(2,'Contract demand vs actual and billing demand')));
-  B.push(blk(bChart(chartGrouped(
-    d.rows.map(function(r){ return r.month; }),
-    [{ name:'Actual MD', color:SERIES[0], values:d.rows.map(function(r){ return num(r.actualMD)||0; }) },
-     { name:'Billing demand', color:SERIES[1], values:d.rows.map(function(r){ return num(r.billingDemand)||0; }) }],
-    'Demand trend', 'kVA',
-    d.cd ? { value:d.cd, label:'Contract demand ' + inr(d.cd) + ' kVA' } : null),
-    'Actual maximum demand against billing demand, with the sanctioned contract demand marked.')));
-
-  B.push(blk(bH(2,'Annual power factor trend')));
-  B.push(blk(bChart(chartLine(
-    d.rows.map(function(r){ return r.month; }),
-    d.rows.map(function(r){
-      var p = num(r.pf); if (p) return p;
-      var kwh = num(r.kwh), kvah = num(r.kvah);
-      return (kwh && kvah) ? kwh/kvah : null;
-    }),
-    'Monthly power factor', 'PF', { value:0.95, label:'Desirable 0.95' }),
-    'Months below 0.95 are marked and labelled — those are the months carrying a penalty.')));
-
-  var night = d.rows.some(function(r){ return num(r.todNight); });
-  if (night){
-    B.push(blk(bH(2,'Time of day (TOD) in electricity bill')));
-    B.push(blk(bChart(chartStacked(
-      d.rows.map(function(r){ return r.month; }),
-      [{ name:'Night', color:SERIES[2], values:d.rows.map(function(r){ return num(r.todNight)||0; }) },
-       { name:'Peak', color:SERIES[1], values:d.rows.map(function(r){ return num(r.todPeak)||0; }) },
-       { name:'Normal', color:SERIES[0], values:d.rows.map(function(r){
-           return Math.max(0,(num(r.kwh)||0) - (num(r.todNight)||0) - (num(r.todPeak)||0)); }) }],
-      'Time of day split', 'kWh'),
-      'Night-hour units attract a rebate; peak-hour units a surcharge.')));
-  }
-
-  B.push(blk(bH(2,'Recommendation in electricity bills')));
-  if (S.billNotes.pfNote) B.push(blk(bP(S.billNotes.pfNote)));
-  if (S.billNotes.cdNote) B.push(blk(bP(S.billNotes.cdNote)));
-  if (d.cd && d.maxMD){
-    var headroom = ((d.cd - d.maxMD) / d.cd) * 100;
-    if (headroom > 12) B.push(blk(bNote(
-      'Highest recorded maximum demand is ' + inr(Math.round(d.maxMD)) + ' kVA against a contract demand of ' +
-      inr(d.cd) + ' kVA — ' + fix(headroom,0) + ' % headroom. Contract demand optimisation is worth evaluating, ' +
-      'remembering that billing demand will not fall below 85 % of whatever contract demand is set.')));
-  }
-  ledgerFor(B, 'bills', { heading:false });
-}
-
-function buildDistSection(B){
-  if (!S.dist.pcc.length && !S.dist.motors.length && !S.dist.demand.avg) return;
-  B.push(blk(bH(1,'Assessment of electrical distribution system')));
-  if (S.dist.demand.avg !== null && S.dist.demand.avg !== undefined){
-    B.push(blk(bH(2,'Plant load demand study')));
-    B.push(tblBlock(['Mainline demand monitoring','Contract demand','Average','Minimum','Maximum'],
-      [['Demand kVA', inr(num(S.dist.demand.contract)), fix(num(S.dist.demand.avg)),
-        fix(num(S.dist.demand.min)), fix(num(S.dist.demand.max))]],
-      { colw:['32%','17%','17%','17%','17%'] }));
-    if (S.dist.demand.window) B.push(blk(bP('Recording window: ' + S.dist.demand.window, { size:9.5, italic:true })));
-  }
-  if (S.dist.pcc.length){
-    B.push(blk(bH(2,'Plant section-wise energy consumption — electrical PCC load')));
-    B.push(tblBlock(['Name of machine','Voltage','Current','kW','Q kVAr','kVA','PF','%V THD','%I THD'],
-      S.dist.pcc.map(function(r){
-        return [r.name, fix(num(r.v)), fix(num(r.i)), fix(num(r.kw)), fix(num(r.kvar)),
-          fix(num(r.kva)), fix(num(r.pf),3),
-          { v:fix(num(r.vthd)), tone:(num(r.vthd) > 5 ? 'bad' : null) },
-          { v:fix(num(r.ithd)), tone:(num(r.ithd) > 8 ? 'bad' : null) }];
-      }), { size:8, colw:['22%','10%','10%','9%','10%','9%','8%','11%','11%'] }));
-    B.push(blk(bNote('Red cells exceed the IEEE-519:2022 limits of 5 % voltage THD and 8 % current THD.')));
-  }
-  if (S.dist.motors.length){
-    B.push(blk(bH(2,'Motor load study')));
-    B.push(tblBlock(['S.No','Name','Rated kW','Starter','Freq/rpm','Voltage','Current','kW','kVAr','kVA','PF','% Load'],
-      S.dist.motors.map(function(r,i){
-        var load = (num(r.kw) && num(r.rated)) ? (num(r.kw)/num(r.rated))*100 : null;
-        return [i+1, r.name, fix(num(r.rated),1), r.starter, fix(num(r.freq),0),
-          fix(num(r.v),0), fix(num(r.i),1), fix(num(r.kw),2), fix(num(r.kvar),2),
-          fix(num(r.kva),2), fix(num(r.pf),3),
-          { v: load === null ? '—' : fix(load,1),
-            tone: load === null ? null : (load > 100 ? 'bad' : (load < 50 ? 'watch' : 'ok')) }];
-      }), { size:7.4, colw:['5%','19%','8%','7%','7%','7%','7%','7%','7%','7%','7%','12%'] }));
-    B.push(blk(bNote('Above 100 % is an overloaded motor; below 50 % is an oversized one. The recommended band is 70–90 %.')));
-    if (S.dist.motorNote) B.push(blk(bP(S.dist.motorNote)));
-  }
-  if (S.dist.apfc.length){
-    B.push(blk(bH(2,'Automatic power factor correction study')));
-    B.push(tblBlock(['Stage','Rated kVAr','Voltage','I-R','I-Y','I-B','Remark'],
-      S.dist.apfc.map(function(r){
-        return [r.stage, fix(num(r.rated),1), fix(num(r.v),0), fix(num(r.ir),1),
-          fix(num(r.iy),1), fix(num(r.ib),1),
-          { v:r.remark || '', tone:(/derat|fail|weak/i.test(r.remark||'') ? 'bad' : null) }];
-      }), { colw:['14%','14%','12%','12%','12%','12%','24%'] }));
-    if (S.dist.apfcNote) B.push(blk(bP(S.dist.apfcNote)));
-  }
-  ledgerFor(B, 'dist');
-}
+/* buildDistSection lives in p19_pq.js. */
 
 function buildTransformerSection(B){
   B.push(blk(bH(1,'Power quality and transformer assessment')));
 
-  /* SLD - generated from the hierarchy, or a drawn one if supplied. */
-  B.push(blk(bH(2,'Plant single line diagram')));
-  if (S.assets.sldImage){
-    B.push(blk(bImg(S.assets.sldImage, 'Plant single line diagram', 300)));
-  } else if (S.sld.nodes.length){
-    var built = sldSvg(true, false);
-    B.push(blk(bChart(built.svg,
-      'Generated from the panel hierarchy. Nodes breaching IEEE-519 are outlined in red; dashed nodes are provisional, recorded at the walkthrough and not yet confirmed.')));
-  } else {
-    B.push(blk(bNote('No single line diagram yet — build one from the panel tables in the Single line diagram section, or drop in a drawn one.')));
-  }
+  /* The single line diagram opens the electrical distribution chapter (p19). */
 
   if (S.tr.capacity){
     B.push(blk(bH(3,'Rated details of transformer')));
@@ -211,16 +83,9 @@ function ledgerFor(B, moduleId, opts){
      so, rather than getting a near-identical second one underneath it. */
   if (!(opts && opts.heading === false))
     B.push(blk(bH(2,'Recommendation in ' + (MODULE_NAMES[moduleId] || moduleId).toLowerCase())));
-  rows.forEach(function(r, i){
-    B.push(blk(bP((i+1) + '. ' + (r.recommendation || '—'), { bold:false })));
-    if (r.observation) B.push(blk(bP(r.observation, { size:9.8 })));
-    B.push(blk(bFormula([
-      'Annual energy saving    = ' + inr(num(r.saving)) + ' ' + (r.unit || ''),
-      'Annual monetary saving  = ' + rupees(num(r.monetary)),
-      'Investment              = ' + rupees(num(r.investment)),
-      'Simple payback period   = ' + months(roiMonths(r))
-    ])));
-  });
+  /* Each recommendation is its own small document - title, observation,
+     recommendation, pictures, table, and the benefit worked in the open. */
+  rows.forEach(function(r, i){ recoBlocks(B, r, i + 1); });
   B.push({ anchor:moduleId });
 }
 
@@ -233,7 +98,7 @@ function buildUtilities(B){
   if (S.enabled.boiler) buildFired(B, S.boiler, 'Performance assessment of boiler', 'boiler');
   if (S.enabled.tfh) buildFired(B, S.tfh, 'Performance assessment of thermic oil heater', 'tfh');
 
-  if (S.enabled.compressor && S.compressor.length){
+  if (S.enabled.compressor && (S.compressor.length || hasRecos('compressor'))){
     B.push(blk(bH(2,'Performance assessment of air compressor')));
     B.push(tblBlock(['Sr','Parameter'].concat(S.compressor.map(function(k,i){ return k.tag || ('Compressor ' + (i+1)); })),
       [['1','Make / model'].concat(S.compressor.map(function(k){ return k.make || '—'; })),
@@ -262,7 +127,7 @@ function buildUtilities(B){
     ledgerFor(B, 'compressor');
   }
 
-  if (S.enabled.coolingTower && S.coolingTower.length){
+  if (S.enabled.coolingTower && (S.coolingTower.length || hasRecos('coolingTower'))){
     B.push(blk(bH(2,'Performance assessment of cooling tower')));
     B.push(tblBlock(['Cooling tower','Rated TR','Hot in °C','Cold out °C','Wet bulb °C','Range','Approach','Effectiveness'],
       S.coolingTower.map(function(r){
@@ -276,7 +141,7 @@ function buildUtilities(B){
     ledgerFor(B, 'coolingTower');
   }
 
-  if (S.enabled.chiller && S.chiller.readings.length){
+  if (S.enabled.chiller && (S.chiller.readings.length || hasRecos('chiller'))){
     B.push(blk(bH(2,'Performance assessment of chiller')));
     if (S.chiller.spec.length) B.push(tblBlock(['Particular','Specification'],
       S.chiller.spec.map(function(r){ return [r.p, r.v]; }), { colw:['45%','55%'] }));
@@ -293,7 +158,7 @@ function buildUtilities(B){
     ledgerFor(B, 'chiller');
   }
 
-  if (S.enabled.pumps && S.pumps.length){
+  if (S.enabled.pumps && (S.pumps.length || hasRecos('pumps'))){
     B.push(blk(bH(2,'Pumping system analysis')));
     DEFAULTS.pumpMethod.forEach(function(p){ B.push(blk(bP(p))); });
     B.push(tblBlock(['Pump','Make','Rated kW','Flow m³/hr','Head m','Motor kW','Hydraulic kW','Shaft kW','Pump eff %'],
@@ -310,9 +175,9 @@ function buildUtilities(B){
     ledgerFor(B, 'pumps');
   }
 
-  if (S.enabled.jets && S.jets.length) buildJets(B);
+  if (S.enabled.jets && (S.jets.length || hasRecos('jets'))) buildJets(B);
 
-  if (S.enabled.lux && S.lux.length){
+  if (S.enabled.lux && (S.lux.length || hasRecos('lux'))){
     B.push(blk(bH(2,'Lux level measurement')));
     DEFAULTS.luxMethod.forEach(function(p){ B.push(blk(bP(p))); });
     B.push(tblBlock(['ILER','Assessment'], DEFAULTS.ilerBands, { colw:['30%','70%'] }));
@@ -332,7 +197,7 @@ function buildUtilities(B){
     ledgerFor(B, 'lux');
   }
 
-  if (S.enabled.solar && S.solar.rows.length){
+  if (S.enabled.solar && (S.solar.rows.length || hasRecos('solar'))){
     B.push(blk(bH(2,'Solar plant monitoring')));
     B.push(tblBlock(['Month','Generation kWh','Irradiance kWh/m²','CUF %'],
       S.solar.rows.map(function(r){
@@ -348,7 +213,7 @@ function buildUtilities(B){
     ledgerFor(B, 'solar');
   }
 
-  if (S.enabled.earth && S.earth.length){
+  if (S.enabled.earth && (S.earth.length || hasRecos('earth'))){
     B.push(blk(bH(2,'Earth loop resistance measurement')));
     B.push(tblBlock(['S.N.','Earth pit / location','Resistance Ω','Limit Ω','Status'],
       S.earth.map(function(r,i){
@@ -356,9 +221,10 @@ function buildUtilities(B){
         return [i+1, r.location, fix(v,2), fix(l,2),
           { v: v===null?'—':(v<=l?'Within limit':'Exceeds limit'), tone: v===null?null:(v<=l?'ok':'bad') }];
       }), { colw:['8%','42%','18%','14%','18%'] }));
+    ledgerFor(B, 'earth');
   }
 
-  if (S.enabled.machines && S.machines.length){
+  if (S.enabled.machines && (S.machines.length || hasRecos('machines'))){
     B.push(blk(bH(2,'Machine monitoring')));
     S.machines.forEach(function(m){
       B.push(blk(bH(3, m.title || 'Machine')));
@@ -370,11 +236,19 @@ function buildUtilities(B){
     ledgerFor(B, 'machines');
   }
 
-  if (S.enabled.sop && S.sop.length){
+  if (S.enabled.sop && (S.sop.length || hasRecos('sop'))){
     B.push(blk(bH(1,'Guidelines / SOP to reduce resource consumption')));
     B.push(tblBlock(['Area','Guideline'],
       S.sop.map(function(r){ return [r.area, r.guideline]; }), { colw:['26%','74%'] }));
+    ledgerFor(B, 'sop');
   }
+}
+
+/* True when a chapter has recommendations to print, so a utility that is
+   switched on but has no measurement rows yet still gets its chapter - the
+   recommendations written for it must not vanish silently. */
+function hasRecos(moduleId){
+  return S.ledger.some(function(r){ return r.module === moduleId; });
 }
 
 function buildFired(B, data, title, moduleId){

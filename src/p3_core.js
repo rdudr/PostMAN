@@ -167,18 +167,21 @@ function blankState(){
               earth:false, machines:false, sop:false },
     team:{ plant:[], iea:defaultIeaTeam() },
     production:{ intro:'', products:[], website:'', phone:'', mail:'', factoryAddress:'', flowNote:'' },
-    baseline:{ elec:[], thermal:[], thermalUnit:'Litre', thermalName:'LDO', water:[] },
+    baseline:blankBaseline(),
     bills:[],
     billCursor:0,
     billNotes:{ pfNote:'', cdNote:'', todNote:'' },
-    ghg:{ scope3Note:'', note:'' },
+    billCfg:blankBillCfg(),
+    ghg:{ scope3Note:'', note:'', site:'', mobileFuel:'Diesel', mobileQty:null, mobileUnit:'Litre', mobileEf:2.66,
+         reOffset:null, reOffsetSince:'', inventoryLink:'', meterName:'ABT meter' },
     dist:{ demand:{ contract:null, avg:null, min:null, max:null, window:'' },
-           pcc:[], motors:[], apfc:[], motorNote:'', apfcNote:'' },
+           pcc:[], motors:[], apfc:[], motorNote:'', apfcNote:'', mains:[], mcc:[], foxUpload:null },
+    pq:blankPq(),
     tr:{ make:'', capacity:null, primaryV:null, secondaryV:null, impedance:null,
          noLoadLoss:null, loadLoss:null, oilQty:'', year:'', srNo:'',
          meterUnits:null, loading:null, stdEff:null, actualEff:null,
          vthd:null, ithd:null, thermoNote:'', panels:[] },
-    sld:{ nodes:[], edges:[], nextId:1 },
+    sld:{ nodes:[], edges:[], nextId:1, selected:null },
     boiler:{ spec:[], direct:{}, indirect:{}, obs:'' },
     tfh:{ spec:[], direct:{}, indirect:{}, obs:'' },
     compressor:[],
@@ -331,13 +334,26 @@ function rollUp(rows){
             moneyTotal:0, investment:0, co2:0, roi:null, draft:0, count:rows.length };
   rows.forEach(function(r){
     if (r.status !== 'verified') t.draft++;
-    var s = num(r.saving) || 0;
-    if (r.type === 'electrical') t.elecKwh += s;
-    if (r.type === 'thermal') t.thermalQty += s;
-    var m = num(r.monetary) || 0;
-    t.money[r.type] = (t.money[r.type] || 0) + m;
-    t.moneyTotal += m;
-    t.investment += num(r.investment) || 0;
+    /* A recommendation built with the benefit editor carries its electrical
+       and thermal money separately, so one that saves both is counted in
+       both columns rather than lumped under whichever type it was labelled. */
+    if (typeof recoBenefits === 'function' && (r.electrical || (r.thermal && r.thermal.length))){
+      var b = recoBenefits(r);
+      t.elecKwh += b.annualKwh || 0;
+      Object.keys(b.thermalTotals).forEach(function(u){ t.thermalQty += b.thermalTotals[u]; });
+      t.money.electrical += b.electricalSavingInr || 0;
+      t.money.thermal += b.thermalSavingInr || 0;
+      t.moneyTotal += b.totalSavingInr || 0;
+      t.investment += b.investmentInr || 0;
+    } else {
+      var s = num(r.saving) || 0;
+      if (r.type === 'electrical') t.elecKwh += s;
+      if (r.type === 'thermal') t.thermalQty += s;
+      var m = num(r.monetary) || 0;
+      t.money[r.type] = (t.money[r.type] || 0) + m;
+      t.moneyTotal += m;
+      t.investment += num(r.investment) || 0;
+    }
     t.co2 += num(r.co2) || 0;
   });
   t.roi = t.moneyTotal > 0 ? (t.investment / t.moneyTotal) * 12 : null;

@@ -1,14 +1,17 @@
 import base64, re, sys, os
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-OUT  = os.path.join(os.path.dirname(BASE), 'app.html')
+# One build, two names: PostMan.html is the file people double-click and
+# share; index.html is the same bytes at the name Vercel serves.
+OUTS = [os.path.join(os.path.dirname(BASE), 'PostMan.html'),
+        os.path.join(os.path.dirname(BASE), 'index.html')]
 
 def rd(name):
     return open(os.path.join(BASE, name), encoding='utf-8').read()
 
 parts_js = ['p3_core.js','p4_registry.js','p5_ui.js','p6_forms.js','p7_modules.js',
             'p8_sld.js','p9_charts.js','p10_report.js','p11_sections.js',
-            'p14_custom.js','p15_bills.js','p12_pages.js','p13_boot.js']
+            'p16_reco.js','p17_baseline.js','p17b_ghg.js','p18_ebill.js','p19_pq.js','p14_custom.js','p15_bills.js','p12_pages.js','p13_boot.js']
 
 head  = rd('p1_head.html')
 shell = rd('p2_shell.html')
@@ -65,14 +68,17 @@ doc = ''.join(out)
 def b64(path):
     return 'data:image/png;base64,' + base64.b64encode(open(path,'rb').read()).decode()
 
-ART = os.path.join(os.path.dirname(BASE), 'art')
-for token, path in [('__SEAL__',  '/tmp/verify/iitgn-seal.png'),
-                    ('__KISEM__', '/tmp/verify/kisem-logo.png'),
+ART   = os.path.join(BASE, 'art')
+BRAND = os.path.join(BASE, 'brand')
+for token, path in [('__SEAL__',  os.path.join(BRAND, 'iitgn-seal.png')),
+                    ('__KISEM__', os.path.join(BRAND, 'kisem-logo.png')),
                     ('__PLATE1__', os.path.join(ART, 'plate1.png')),
                     ('__PLATE2__', os.path.join(ART, 'plate2.png'))]:
     doc = doc.replace(token, b64(path))
     assert token not in doc, token
 assert all(ord(c) < 128 for c in doc), 'non-ASCII survived'
 
-open(OUT, 'w', encoding='utf-8').write(doc)
-print('wrote %s  %.0f KB' % (OUT, len(doc.encode())/1024))
+for out_path in OUTS:
+    with open(out_path, 'w', encoding='utf-8', newline='\n') as fh:
+        fh.write(doc)
+    print('wrote %s  %.0f KB' % (out_path, len(doc.encode())/1024))
