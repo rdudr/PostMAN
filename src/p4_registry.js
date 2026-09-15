@@ -23,9 +23,9 @@ var SECTIONS = [
   { id:'ghg',         group:'Assessment',   title:'GHG accounting',        always:true, derived:true },
   { id:'verify',      group:'Assessment',   title:'Bill capture & verify', always:true },
   { id:'bills',       group:'Assessment',   title:'Electricity bill analysis', always:true },
-  { id:'dist',        group:'Assessment',   title:'Electrical distribution', always:true },
-  { id:'tr',          group:'Assessment',   title:'Power quality & transformer', always:true },
   { id:'sld',         group:'Assessment',   title:'Single line diagram',   always:true },
+  { id:'tr',          group:'Assessment',   title:'Power quality & transformer', always:true },
+  { id:'dist',        group:'Assessment',   title:'Electrical distribution', always:true },
 
   { id:'boiler',       group:'Utilities', title:'Boiler',                opt:'boiler' },
   { id:'tfh',          group:'Utilities', title:'Thermic fluid heater',  opt:'tfh' },

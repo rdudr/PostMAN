@@ -305,15 +305,19 @@ function buildReport(){
 
   B.push({ anchor:'bills' });
 
-  /* --- Distribution --- */
-  buildDistSection(B);
+  /* --- Single line diagram, PQ & transformer, then distribution: the same
+     order as the menu, so what is seen on the left is what prints. --- */
+  buildSldSection(B);
 
-  B.push({ anchor:'dist' });
+  B.push({ anchor:'sld' });
 
-  /* --- PQ & transformer --- */
   buildTransformerSection(B);
 
   B.push({ anchor:'tr' });
+
+  buildDistSection(B);
+
+  B.push({ anchor:'dist' });
 
   /* --- Utility modules --- */
   buildUtilities(B);

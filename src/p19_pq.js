@@ -398,21 +398,25 @@ function uploadStamp(){
     (u.file ? ' (' + u.file + ')' : '') + (u.exportDate ? '; exported from FOX KISEM on ' + u.exportDate : '') + '.' : '';
 }
 
+/* The single line diagram is the first chapter of the electrical part, the
+   way it is the first thing an engineer draws on site: it names every panel
+   the two chapters after it report on. */
+function buildSldSection(B){
+  if (!S.sld.nodes.length && !S.assets.sldImage) return;
+  B.push(blk(bH(1,'Plant single line diagram')));
+  if (S.assets.sldImage) B.push(blk(bImg(S.assets.sldImage, 'Plant single line diagram', 300)));
+  else B.push(blk(bChart(sldSvg(true, false).svg, 'Generated from the panel hierarchy. Nodes breaching IEEE-519 are outlined in red; dashed nodes are provisional, recorded at the walkthrough and not yet confirmed.')));
+  if (uploadStamp()) B.push(blk(bP(uploadStamp(), { size:9, italic:true })));
+}
 function buildDistSection(B){
   pqState();
   var d = S.dist;
-  var any = d.pcc.length || d.motors.length || d.mains.length || d.mcc.length || d.apfc.length || (d.demand && d.demand.avg) || S.sld.nodes.length || S.assets.sldImage || S.pq.recordings.length;
+  var any = d.pcc.length || d.motors.length || d.mains.length || d.mcc.length || d.apfc.length || (d.demand && d.demand.avg) || S.pq.recordings.length;
   if (!any) return;
   B.push(blk(bH(1,'Assessment of electrical distribution system')));
+  B.push(blk(bP('Panels are named as on the plant single line diagram. Measurements come from the FOX KISEM field record and the power quality analyser recordings joined to each panel by recording ID.', { size:9.5 })));
 
-  /* --- 1. single line diagram --- */
-  B.push(blk(bH(2,'Plant single line diagram')));
-  if (S.assets.sldImage) B.push(blk(bImg(S.assets.sldImage, 'Plant single line diagram', 300)));
-  else if (S.sld.nodes.length) B.push(blk(bChart(sldSvg(true, false).svg, 'Generated from the panel hierarchy. Nodes breaching IEEE-519 are outlined in red; dashed nodes are provisional, recorded at the walkthrough and not yet confirmed.')));
-  else B.push(blk(bNote('No single line diagram yet — build one in the Single line diagram section, or drop in a drawn one.')));
-  if (uploadStamp()) B.push(blk(bP(uploadStamp(), { size:9, italic:true })));
-
-  /* --- 2. plant load demand --- */
+  /* --- 1. plant load demand --- */
   if (d.demand && d.demand.avg !== null && d.demand.avg !== undefined){
     B.push(blk(bH(2,'Plant load demand study')));
     B.push(tblBlock(['Mainline demand monitoring','Contract demand','Average','Minimum','Maximum'],
@@ -421,7 +425,7 @@ function buildDistSection(B){
     if (d.demand.window) B.push(blk(bP('Recording window: ' + d.demand.window, { size:9.5, italic:true })));
   }
 
-  /* --- 3. main inputs, each with its recording --- */
+  /* --- 2. main inputs, each with its recording --- */
   var mains = d.mains.length ? d.mains : S.pq.recordings.filter(function(r){ return r.role === 'main'; }).map(function(r){ return { name:r.name, recId:r.recId, pqName:r.name, _recOnly:true }; });
   mains.forEach(function(m){
     B.push(blk(bH(2,'Plant main input — ' + m.name)));
@@ -429,7 +433,7 @@ function buildDistSection(B){
     recordingsFor(m).forEach(function(rec){ B.push(blk(bH(3,'Power quality analysis — ' + (rec.recId || rec.name)))); recSummaryBlocks(B, rec); });
   });
 
-  /* --- 4. PCC panels, each with its recording --- */
+  /* --- 3. PCC panels, each with its recording --- */
   d.pcc.forEach(function(p){
     B.push(blk(bH(2,'PCC panel — ' + p.name)));
     B.push(blk(bH(3,'Measured at the panel')));
@@ -454,7 +458,7 @@ function buildDistSection(B){
       'Harmonic distortion at each PCC', '%', { value:IEEE.ithd, label:'ITHD limit 8 %' }), 'Voltage and current THD against the IEEE-519 current limit')));
   }
 
-  /* --- 5. MCC panels --- */
+  /* --- 4. MCC panels --- */
   if (d.mcc.length){
     B.push(blk(bH(2,'MCC panels')));
     B.push(tblBlock(['MCC','Fed from PCC','Voltage','Current','kW','PF','%V THD','%I THD','Recorded by'],
@@ -464,7 +468,7 @@ function buildDistSection(B){
     d.mcc.forEach(function(p){ recordingsFor(p).forEach(function(rec){ B.push(blk(bH(3,'Power quality analysis — ' + p.name + ' (' + (rec.recId || rec.name) + ')'))); recSummaryBlocks(B, rec); }); });
   }
 
-  /* --- 6. motor load study --- */
+  /* --- 5. motor load study --- */
   if (d.motors.length){
     B.push(blk(bH(2,'Motor load study')));
     var pct2 = function(r){ var lf = num(r.loadFactor); if (lf !== null) return lf <= 1.5 ? lf * 100 : lf; return (num(r.kw) && num(r.rated)) ? (num(r.kw) / num(r.rated)) * 100 : null; };
@@ -488,7 +492,7 @@ function buildDistSection(B){
     if (d.motorNote) B.push(blk(bP(d.motorNote)));
   }
 
-  /* --- 7. APFC --- */
+  /* --- 6. APFC --- */
   if (d.apfc.length){
     B.push(blk(bH(2,'Automatic power factor correction study')));
     var byPanel = {};
