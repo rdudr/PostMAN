@@ -194,6 +194,11 @@ table.ed td.act{width:1%;padding:0 4px;text-align:center}
 
 /* ---- report canvas ---- */
 .report{color-scheme:light}
+/* The page has no doctype, so it renders in quirks mode, where a table
+   ignores the colour of its parent and takes the body's. In the dark theme
+   that is near-white - and the paper is white, so every report table
+   printed as if it were empty. Tables on a page take the page's ink. */
+.pagewrap table,#measure table{color:inherit}
 .pagewrap{background:#fff;overflow:hidden;margin:0 auto;
   box-shadow:0 1px 2px rgba(15,47,118,.12),0 12px 30px rgba(15,47,118,.13)}
 .stack{display:flex;flex-direction:column;align-items:center;gap:18px}

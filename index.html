@@ -194,6 +194,11 @@ table.ed td.act{width:1%;padding:0 4px;text-align:center}
 
 /* ---- report canvas ---- */
 .report{color-scheme:light}
+/* The page has no doctype, so it renders in quirks mode, where a table
+   ignores the colour of its parent and takes the body's. In the dark theme
+   that is near-white - and the paper is white, so every report table
+   printed as if it were empty. Tables on a page take the page's ink. */
+.pagewrap table,#measure table{color:inherit}
 .pagewrap{background:#fff;overflow:hidden;margin:0 auto;
   box-shadow:0 1px 2px rgba(15,47,118,.12),0 12px 30px rgba(15,47,118,.13)}
 .stack{display:flex;flex-direction:column;align-items:center;gap:18px}
@@ -1857,7 +1862,7 @@ var SLD_TYPES = {
 function sldAdd(type, name, parentId){
   var n = { id:'n'+(S.sld.nextId++), type:type, name:name || SLD_TYPES[type].label,
             parent:parentId || null, kw:null, kva:null, pf:null, vthd:null, ithd:null,
-            rating:'', recId:'', provisional:false, x:null, y:null };
+            rating:'', recId:'', provisional:false, x:null, y:null, dx:0, dy:0 };
   S.sld.nodes.push(n);
   return n;
 }
@@ -1865,36 +1870,63 @@ function sldNode(id){
   for (var i=0;i<S.sld.nodes.length;i++) if (S.sld.nodes[i].id === id) return S.sld.nodes[i];
   return null;
 }
-/* Layered tree layout. Positions persist once dragged, but a panel added in
-   JET-Eff still appears without anyone redrawing the diagram. */
-function sldLayout(force){
-  var depth = {}, children = {};
-  S.sld.nodes.forEach(function(n){ children[n.id] = []; });
-  S.sld.nodes.forEach(function(n){ if (n.parent && children[n.parent]) children[n.parent].push(n); });
-  var roots = S.sld.nodes.filter(function(n){ return !n.parent; });
-  var rowAt = {};
-  function place(n, d){
-    depth[n.id] = d;
-    rowAt[d] = (rowAt[d] || 0);
-    children[n.id].forEach(function(c){ place(c, d+1); });
-  }
-  roots.forEach(function(r){ place(r, 0); });
-  var byDepth = {};
+/* Parent -> children map, with anything whose parent is missing (or is
+   itself, or would close a loop) treated as a source. A loop cannot be
+   drawn as a tree, and one wrong "Fed from" must not blank the diagram. */
+function sldTree(){
+  var byId = {}, children = {};
+  S.sld.nodes.forEach(function(n){ byId[n.id] = n; children[n.id] = []; });
+  var roots = [];
   S.sld.nodes.forEach(function(n){
-    var d = depth[n.id] || 0;
-    (byDepth[d] = byDepth[d] || []).push(n);
+    if (n.parent && byId[n.parent] && n.parent !== n.id) children[n.parent].push(n); else roots.push(n);
   });
-  var maxW = 0;
-  Object.keys(byDepth).forEach(function(d){
-    var row = byDepth[d], y = 40 + d * 92, x = 30;
-    row.forEach(function(n){
-      var t = sldBox(n);
-      if (force || n.x === null || n.y === null){ n.x = x; n.y = y; }
-      x += t.w + 26;
-    });
-    maxW = Math.max(maxW, x);
+  var seen = {};
+  function mark(n){ if (seen[n.id]) return; seen[n.id] = 1; children[n.id].forEach(mark); }
+  roots.forEach(mark);
+  /* Nodes only reachable through a loop: cut the loop at the first one met. */
+  S.sld.nodes.forEach(function(n){
+    if (seen[n.id]) return;
+    children[n.parent] = children[n.parent].filter(function(c){ return c.id !== n.id; });
+    roots.push(n); mark(n);
   });
-  return { width: Math.max(760, maxW + 20), height: 60 + (Object.keys(byDepth).length) * 92 };
+  return { roots:roots, children:children };
+}
+/* Tree layout, redone on every draw: each subtree is centred under its
+   parent and siblings sit side by side, so adding a second transformer under
+   the grid makes room for itself and every line follows. A dragged node
+   keeps its nudge (dx, dy) relative to where the layout would put it, so a
+   hand adjustment survives the next panel being added; Re-layout clears the
+   nudges. */
+function sldLayout(force){
+  var GAP = 26, ROW = 36, LEFT = 30, TOP = 30;
+  var tree = sldTree(), children = tree.children;
+  var box = {}, depthOf = {}, rowH = {}, span = {};
+  S.sld.nodes.forEach(function(n){ box[n.id] = sldBox(n); if (force){ n.dx = 0; n.dy = 0; } });
+  function measure(n, d){
+    depthOf[n.id] = d; rowH[d] = Math.max(rowH[d] || 0, box[n.id].h);
+    var w = 0;
+    children[n.id].forEach(function(c){ w += (w ? GAP : 0) + measure(c, d + 1); });
+    span[n.id] = Math.max(box[n.id].w, w);
+    return span[n.id];
+  }
+  var total = 0;
+  tree.roots.forEach(function(r){ total += (total ? GAP * 2 : 0) + measure(r, 0); });
+  var rowY = {}, y = TOP;
+  Object.keys(rowH).map(Number).sort(function(a, b){ return a - b; }).forEach(function(d){ rowY[d] = y; y += rowH[d] + ROW; });
+  var maxX = 0, maxY = 0;
+  function place(n, left){
+    var b = box[n.id], s = span[n.id];
+    n.x = Math.max(4, Math.round(left + (s - b.w) / 2 + (n.dx || 0)));
+    n.y = Math.max(4, Math.round(rowY[depthOf[n.id]] + (n.dy || 0)));
+    maxX = Math.max(maxX, n.x + b.w); maxY = Math.max(maxY, n.y + b.h);
+    var kidsW = 0;
+    children[n.id].forEach(function(c){ kidsW += (kidsW ? GAP : 0) + span[c.id]; });
+    var cx = left + (s - kidsW) / 2;
+    children[n.id].forEach(function(c){ place(c, cx); cx += span[c.id] + GAP; });
+  }
+  var x = LEFT;
+  tree.roots.forEach(function(r){ place(r, x); x += span[r.id] + GAP * 2; });
+  return { width: Math.max(760, maxX + LEFT), height: Math.max(120, maxY + TOP) };
 }
 function sldBuildFromHierarchy(){
   S.sld.nodes = []; S.sld.nextId = 1;
@@ -1935,6 +1967,23 @@ function sldBox(n){
   var h = n.type === 'bus' ? t.h : Math.max(t.h, 22 + lines.length * 11 + 4);
   return { w:w, h:h, fill:t.fill, stroke:t.stroke, lines:lines };
 }
+/* The connector: down from the parent's foot, across, down into the child. */
+function sldEdgeD(p, n){
+  var pt = sldBox(p), nt = sldBox(n);
+  var x1 = p.x + pt.w/2, y1 = p.y + pt.h, x2 = n.x + nt.w/2, y2 = n.y;
+  var mid = (y1 + y2) / 2;
+  return 'M' + x1 + ' ' + y1 + ' L' + x1 + ' ' + mid + ' L' + x2 + ' ' + mid + ' L' + x2 + ' ' + y2;
+}
+/* Redraws only the on-screen drawing, so typing in a node card shows the
+   box grow and the line move without rebuilding the whole form (which
+   would take the cursor out of the field). */
+function sldRefreshCanvas(){
+  var host = q('sldcanvas'); if (!host) return;
+  clear(host);
+  var built = sldSvg(false, true);
+  host.appendChild(built.svg);
+  enableSldDrag(built.svg);
+}
 function sldSvg(forReport, guides){
   var dim = sldLayout(false);
   var svgNS = 'http://www.w3.org/2000/svg';
@@ -1958,16 +2007,16 @@ function sldSvg(forReport, guides){
     for (var k in attrs) e.setAttribute(k, attrs[k]);
     return e;
   }
-  /* edges first so boxes sit on top */
-  S.sld.nodes.forEach(function(n){
-    if (!n.parent) return;
-    var p = sldNode(n.parent); if (!p) return;
-    var pt = sldBox(p), nt = sldBox(n);
-    var x1 = p.x + pt.w/2, y1 = p.y + pt.h, x2 = n.x + nt.w/2, y2 = n.y;
-    var mid = (y1 + y2) / 2;
-    var d = 'M' + x1 + ' ' + y1 + ' L' + x1 + ' ' + mid + ' L' + x2 + ' ' + mid + ' L' + x2 + ' ' + y2;
-    svg.appendChild(mk('path', { d:d, fill:'none', stroke:'#5A6875', 'stroke-width':1.4,
-      'stroke-dasharray': n.provisional ? '5 4' : '' }));
+  /* edges first so boxes sit on top; each one is tagged with the child it
+     feeds so a drag can move it without redrawing the whole picture */
+  var tree = sldTree();
+  S.sld.nodes.forEach(function(p){
+    tree.children[p.id].forEach(function(n){
+      var e = mk('path', { d:sldEdgeD(p, n), fill:'none', stroke:'#5A6875', 'stroke-width':1.4,
+        'stroke-dasharray': n.provisional ? '5 4' : '' });
+      e.dataset.edge = n.id; e.dataset.from = p.id;
+      svg.appendChild(e);
+    });
   });
   S.sld.nodes.forEach(function(n){
     var t = sldBox(n);
@@ -2031,16 +2080,32 @@ function sldNodeCard(n){
   }));
   head.appendChild(acts);
   box.appendChild(head);
-  var others = S.sld.nodes.filter(function(o){ return o.id !== n.id; });
+  /* A node cannot be fed from anything downstream of itself. */
+  var tree = sldTree(), below = {};
+  (function mark(id){ tree.children[id].forEach(function(c){ below[c.id] = 1; mark(c.id); }); })(n.id);
+  var others = S.sld.nodes.filter(function(o){ return o.id !== n.id && !below[o.id]; });
+  /* Text and figures redraw the drawing as they are typed; the feed and the
+     type change the tree itself, so those rebuild the node list too. */
+  var live = function(f){
+    var i = f.querySelector('input,select');
+    if (i) i.addEventListener(i.tagName === 'SELECT' || i.type === 'checkbox' ? 'change' : 'input', sldRefreshCanvas);
+    return f;
+  };
+  var structural = function(key, label, options){
+    var s = el('select');
+    options.forEach(function(o){ var op = el('option','', o.t); op.value = o.v; s.appendChild(op); });
+    s.value = n[key] == null ? '' : n[key];
+    return labelled(label, bindInput(s, n, key, { event:'change', structural:true }));
+  };
   box.appendChild(gridOf([
-    fText(n,'name','Name'),
-    fSelect(n,'type','Type', Object.keys(SLD_TYPES).map(function(k){ return { v:k, t:SLD_TYPES[k].label }; })),
-    fSelect(n,'parent','Fed from', [{ v:'', t:'\u2014 nothing (a source) \u2014' }].concat(others.map(function(o){
+    live(fText(n,'name','Name')),
+    structural('type','Type', Object.keys(SLD_TYPES).map(function(k){ return { v:k, t:SLD_TYPES[k].label }; })),
+    structural('parent','Fed from', [{ v:'', t:'\u2014 nothing (a source) \u2014' }].concat(others.map(function(o){
       return { v:o.id, t:o.name + ' (' + (SLD_TYPES[o.type]||SLD_TYPES.load).label + ')' }; }))),
-    fText(n,'rating','Rating','1600 kVA / 250 kW'),
-    fNum(n,'kw','kW'), fNum(n,'kva','kVA'), fNum(n,'pf','PF'),
-    fNum(n,'vthd','% VTHD'), fNum(n,'ithd','% ITHD'),
-    fText(n,'recId','PQ recording ID'),
+    live(fText(n,'rating','Rating','1600 kVA / 250 kW')),
+    live(fNum(n,'kw','kW')), live(fNum(n,'kva','kVA')), live(fNum(n,'pf','PF')),
+    live(fNum(n,'vthd','% VTHD')), live(fNum(n,'ithd','% ITHD')),
+    live(fText(n,'recId','PQ recording ID')),
     fCheck(n,'provisional','Provisional (walkthrough guess, drawn dashed)')
   ]));
   return box;
@@ -2048,7 +2113,7 @@ function sldNodeCard(n){
 
 FORMS.sld = function(w){
   var c = card('Single line diagram',
-    'Built from the hierarchy rather than drawn. Start from the grid, add a transformer, a bus, then the panels and loads fed from each - every node says what feeds it. Click a node to select it; drag to move it; the Delete key removes it. A node breaching IEEE-519 turns red.');
+    'Built from the hierarchy rather than drawn. Start from the grid, add a transformer, a bus, then the panels and loads fed from each - every node says what feeds it. The drawing lays itself out: each node sits centred under what feeds it, and adding or removing one makes room and moves the lines. Click a node to select it; drag to nudge it (the nudge is kept when the drawing re-flows; Re-layout clears it); the Delete key removes it. A node breaching IEEE-519 turns red.');
   var bar = el('div','display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;');
   bar.appendChild(btn('Build from panels + transformer', function(){
     if (S.sld.nodes.length && !confirm('Rebuild the diagram from the panel tables? Manual nodes will be lost.')) return;
@@ -2098,7 +2163,9 @@ function enableSldDrag(svg){
     var box = svg.getBoundingClientRect();
     var vb = svg.viewBox.baseVal;
     var sx = vb.width / box.width, sy = vb.height / box.height;
-    drag = { n:n, ox:(e.clientX - box.left) * sx - n.x, oy:(e.clientY - box.top) * sy - n.y, sx:sx, sy:sy, box:box, g:g, moved:false };
+    drag = { n:n, ox:(e.clientX - box.left) * sx - n.x, oy:(e.clientY - box.top) * sy - n.y, sx:sx, sy:sy, box:box, g:g, moved:false,
+             /* where the layout put it, so the drag becomes a nudge from there */
+             baseX:n.x - (n.dx || 0), baseY:n.y - (n.dy || 0) };
     g.classList.add('sel');
     svg.focus();
     svg.setPointerCapture(e.pointerId);
@@ -2109,8 +2176,16 @@ function enableSldDrag(svg){
     var x = (e.clientX - drag.box.left) * drag.sx - drag.ox;
     var y = (e.clientY - drag.box.top) * drag.sy - drag.oy;
     if (Math.abs(x - drag.n.x) > 2 || Math.abs(y - drag.n.y) > 2) drag.moved = true;
-    drag.n.x = Math.max(4, Math.round(x)); drag.n.y = Math.max(4, Math.round(y));
-    drag.g.setAttribute('transform','translate(' + drag.n.x + ',' + drag.n.y + ')');
+    var n = drag.n;
+    n.x = Math.max(4, Math.round(x)); n.y = Math.max(4, Math.round(y));
+    n.dx = n.x - drag.baseX; n.dy = n.y - drag.baseY;
+    drag.g.setAttribute('transform','translate(' + n.x + ',' + n.y + ')');
+    /* The lines into and out of the box follow it as it moves. */
+    svg.querySelectorAll('path[data-edge]').forEach(function(p){
+      if (p.dataset.edge !== n.id && p.dataset.from !== n.id) return;
+      var from = sldNode(p.dataset.from), to = sldNode(p.dataset.edge);
+      if (from && to) p.setAttribute('d', sldEdgeD(from, to));
+    });
   });
   svg.addEventListener('pointerup', function(){
     if (!drag) return;
@@ -2122,7 +2197,7 @@ function enableSldDrag(svg){
       renderAll();
       var card = document.getElementById('sldn-' + id);
       if (card) card.scrollIntoView({ block:'nearest', behavior:'smooth' });
-    } else drawPreview();
+    } else { sldRefreshCanvas(); drawPreview(); }
   });
   svg.tabIndex = 0;
   svg.style.outline = 'none';
