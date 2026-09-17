@@ -525,6 +525,22 @@ function buildJets(B){
       { colw:['16%','84%'] }));
   }
 
+  /* --- per-jet photographs (single page per jet with images) --------- */
+  var jetsWithImages = jets.filter(function(j){
+    return j.images && Object.keys(j.images).some(function(k){ return j.images[k]; });
+  });
+
+  if (jetsWithImages.length){
+    jetsWithImages.forEach(function(j){
+      var attached = JET_IMAGE_SLOTS.filter(function(s){ return j.images && j.images[s.key]; });
+      if (attached.length){
+        B.push({ node: el('div'), split: false, hardBreak: true });
+        B.push(blk(bH(3, (j.jetNo ? (/^jet/i.test(j.jetNo) ? j.jetNo : 'Jet ' + j.jetNo) : 'Jet') + ' — Photographs & Images')));
+        B.push(blk(bJetGrid(j)));
+      }
+    });
+  }
+
   if (S.jetThermal && S.jetThermal.length){
     B.push(blk(bH(3,'Thermal imaging of jet')));
     S.jetThermal.forEach(function(t){

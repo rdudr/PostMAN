@@ -293,3 +293,179 @@ function renderNav(){
     nav.appendChild(b);
   });
 }
+
+function openJetCropper(imageSrc, slotTitle, onSave){
+  var backdrop = el('div');
+  backdrop.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:rgba(15,23,42,0.85);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:16px;';
+
+  var box = el('div');
+  box.style.cssText = 'background:#0f172a;border:1px solid #334155;border-radius:12px;width:100%;max-width:540px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);overflow:hidden;color:#f8fafc;display:flex;flex-direction:column;font-family:sans-serif;';
+
+  // Header
+  var head = el('div');
+  head.style.cssText = 'padding:12px 16px;border-bottom:1px solid #1e293b;display:flex;align-items:center;justify-content:space-between;background:rgba(2,6,23,0.6);';
+  var titleDiv = el('div');
+  titleDiv.appendChild(el('div','font-weight:bold;font-size:14px;color:#67e8f9;','Edit & Crop Image'));
+  titleDiv.appendChild(el('div','font-size:12px;color:#94a3b8;', slotTitle || 'Jet Photograph'));
+  head.appendChild(titleDiv);
+
+  var closeBtn = el('button');
+  closeBtn.type = 'button';
+  closeBtn.innerHTML = '&#215;';
+  closeBtn.style.cssText = 'background:none;border:none;color:#94a3b8;font-size:24px;cursor:pointer;line-height:1;padding:0 4px;margin-left:auto;';
+  closeBtn.onclick = function(){ if (backdrop.parentNode) document.body.removeChild(backdrop); };
+  head.appendChild(closeBtn);
+  box.appendChild(head);
+
+  // Body / Viewport
+  var body = el('div');
+  body.style.cssText = 'padding:16px;display:flex;flex-direction:column;align-items:center;';
+
+  var hint = el('div','font-size:11px;color:#94a3b8;margin-bottom:8px;','Drag image to position • Scroll or use controls to zoom');
+  body.appendChild(hint);
+
+  var viewport = el('div');
+  viewport.style.cssText = 'position:relative;width:100%;height:260px;background:#020617;border-radius:8px;overflow:hidden;border:2px solid rgba(6,182,212,0.5);cursor:grab;display:flex;align-items:center;justify-content:center;user-select:none;';
+
+  // Grid overlay
+  var grid = el('div');
+  grid.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:10;border:1px solid rgba(6,182,212,0.3);display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr 1fr;';
+  for (var i=0; i<9; i++){
+    var cell = el('div');
+    cell.style.cssText = 'border-right:1px solid rgba(6,182,212,0.15);border-bottom:1px solid rgba(6,182,212,0.15);';
+    grid.appendChild(cell);
+  }
+  viewport.appendChild(grid);
+
+  var img = document.createElement('img');
+  img.src = imageSrc;
+  img.style.cssText = 'max-height:100%;max-width:100%;object-fit:contain;pointer-events:none;transform-origin:center center;';
+  viewport.appendChild(img);
+
+  var zoom = 1;
+  var offsetX = 0, offsetY = 0;
+  var isDragging = false;
+  var dragStartX = 0, dragStartY = 0;
+
+  function updateTransform(){
+    img.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px) scale(' + zoom + ')';
+    zoomVal.textContent = Math.round(zoom * 100) + '%';
+    zoomSlider.value = zoom;
+  }
+
+  viewport.onmousedown = function(e){
+    isDragging = true;
+    viewport.style.cursor = 'grabbing';
+    dragStartX = e.clientX - offsetX;
+    dragStartY = e.clientY - offsetY;
+  };
+  window.onmousemove = function(e){
+    if (!isDragging) return;
+    offsetX = e.clientX - dragStartX;
+    offsetY = e.clientY - dragStartY;
+    updateTransform();
+  };
+  window.onmouseup = function(){
+    isDragging = false;
+    viewport.style.cursor = 'grab';
+  };
+
+  viewport.onwheel = function(e){
+    e.preventDefault();
+    var delta = e.deltaY < 0 ? 0.1 : -0.1;
+    zoom = Math.min(Math.max(zoom + delta, 0.5), 4);
+    updateTransform();
+  };
+
+  body.appendChild(viewport);
+
+  // Zoom controls bar
+  var ctrl = el('div');
+  ctrl.style.cssText = 'width:100%;margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;';
+
+  var zoomLeft = el('div');
+  zoomLeft.style.cssText = 'display:flex;align-items:center;gap:6px;';
+
+  var btnMinus = el('button'); btnMinus.type='button'; btnMinus.textContent = '−';
+  btnMinus.style.cssText = 'height:28px;width:28px;background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:4px;cursor:pointer;font-weight:bold;';
+  btnMinus.onclick = function(){ zoom = Math.max(zoom - 0.2, 0.5); updateTransform(); };
+
+  var zoomSlider = document.createElement('input');
+  zoomSlider.type = 'range'; zoomSlider.min = '0.5'; zoomSlider.max = '3.5'; zoomSlider.step = '0.05'; zoomSlider.value = '1';
+  zoomSlider.style.cssText = 'width:100px;accent-color:#06b6d4;cursor:pointer;';
+  zoomSlider.oninput = function(){ zoom = parseFloat(zoomSlider.value); updateTransform(); };
+
+  var btnPlus = el('button'); btnPlus.type='button'; btnPlus.textContent = '+';
+  btnPlus.style.cssText = 'height:28px;width:28px;background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:4px;cursor:pointer;font-weight:bold;';
+  btnPlus.onclick = function(){ zoom = Math.min(zoom + 0.2, 4); updateTransform(); };
+
+  var zoomVal = el('span','font-family:monospace;font-size:12px;color:#22d3ee;width:40px;text-align:center;','100%');
+
+  zoomLeft.appendChild(btnMinus);
+  zoomLeft.appendChild(zoomSlider);
+  zoomLeft.appendChild(btnPlus);
+  zoomLeft.appendChild(zoomVal);
+  ctrl.appendChild(zoomLeft);
+
+  var btnReset = el('button'); btnReset.type='button'; btnReset.textContent = 'Reset';
+  btnReset.style.cssText = 'height:28px;padding:0 10px;background:#1e293b;border:1px solid #334155;color:#cbd5e1;border-radius:4px;cursor:pointer;font-size:11px;';
+  btnReset.onclick = function(){ zoom = 1; offsetX = 0; offsetY = 0; updateTransform(); };
+  ctrl.appendChild(btnReset);
+
+  body.appendChild(ctrl);
+  box.appendChild(body);
+
+  // Footer
+  var foot = el('div');
+  foot.style.cssText = 'padding:12px 16px;border-top:1px solid #1e293b;display:flex;align-items:center;justify-content:flex-end;gap:8px;background:rgba(2,6,23,0.6);';
+
+  var btnCancel = el('button'); btnCancel.type='button'; btnCancel.textContent = 'Cancel';
+  btnCancel.style.cssText = 'padding:6px 14px;background:none;border:none;color:#94a3b8;font-size:12px;cursor:pointer;';
+  btnCancel.onclick = function(){ if (backdrop.parentNode) document.body.removeChild(backdrop); };
+
+  var btnSave = el('button'); btnSave.type='button'; btnSave.textContent = '✓ Apply & Save';
+  btnSave.style.cssText = 'padding:6px 14px;background:#0891b2;border:none;color:#ffffff;font-size:12px;font-weight:bold;border-radius:6px;cursor:pointer;';
+  btnSave.onclick = function(){
+    var canvas = document.createElement('canvas');
+    var targetW = 800, targetH = 600;
+    canvas.width = targetW; canvas.height = targetH;
+    var ctx = canvas.getContext('2d');
+    if (ctx){
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, targetW, targetH);
+
+      var cropBoxW = viewport.clientWidth || 320;
+      var cropBoxH = viewport.clientHeight || 240;
+      var scaleFactor = targetW / cropBoxW;
+
+      ctx.save();
+      ctx.translate(targetW / 2, targetH / 2);
+      ctx.translate(offsetX * scaleFactor, offsetY * scaleFactor);
+      ctx.scale(zoom, zoom);
+
+      var imgAspect = (img.naturalWidth || 800) / (img.naturalHeight || 600);
+      var boxAspect = cropBoxW / cropBoxH;
+      var drawW = cropBoxW * scaleFactor;
+      var drawH = cropBoxH * scaleFactor;
+      if (imgAspect > boxAspect){
+        drawH = drawW / imgAspect;
+      } else {
+        drawW = drawH * imgAspect;
+      }
+
+      ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+      ctx.restore();
+
+      var dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      if (onSave) onSave(dataUrl);
+    }
+    if (backdrop.parentNode) document.body.removeChild(backdrop);
+  };
+
+  foot.appendChild(btnCancel);
+  foot.appendChild(btnSave);
+  box.appendChild(foot);
+
+  backdrop.appendChild(box);
+  document.body.appendChild(backdrop);
+}

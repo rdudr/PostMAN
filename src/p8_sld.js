@@ -459,8 +459,19 @@ function importJetEff(wb, skip){
 
   var jets = sheetRows(wb, 'Jet Data');
   if (jets.length){
+    var existingByNo = {};
+    (S.jets || []).forEach(function(existingJ){
+      if (existingJ && existingJ.jetNo) existingByNo[String(existingJ.jetNo).trim()] = existingJ;
+    });
+
     S.jets = jets.map(parseJetRow).filter(function(j){ return j; })
-                 .map(function(j){ return recalcJet(j, S.jetCost); });
+                 .map(function(j){
+                   var prev = existingByNo[String(j.jetNo).trim()];
+                   if (prev && prev.images && Object.keys(prev.images).length){
+                     j.images = Object.assign({}, prev.images, j.images || {});
+                   }
+                   return recalcJet(j, S.jetCost);
+                 });
     S.enabled.jets = true;
     log.push(S.jets.length + ' jets (all ' + JET_FIELDS.length + ' columns)');
     var passing = S.jets.filter(function(j){ return j.trapStatus === 'Trap Passing'; }).length;
@@ -600,6 +611,16 @@ var JET_FIELDS = [
 var JET_TEXT = { id:1, jetNo:1, jetType:1, insulation:1, operation:1, trapType:1, trapStatus:1,
                  concentricDrain:1, pumpSuggestion:1, observation:1, recordedBy:1, createdAt:1 };
 
+var JET_IMAGE_SLOTS = [
+  { key: 'body1', title: 'Body Images 1' },
+  { key: 'body2', title: 'Body Images 2' },
+  { key: 'heatExInlet', title: 'Heat Exchange inlet' },
+  { key: 'heatExOutlet', title: 'Heat Exchange outlet' },
+  { key: 'steamInlet', title: 'Steam Inlet' },
+  { key: 'steamOutlet', title: 'Steam Outlet' },
+  { key: 'trap', title: 'Trap' }
+];
+
 function parseJetRow(r){
   var no = r.jetNo === undefined || r.jetNo === null ? '' : String(r.jetNo).trim();
   if (!no) return null;
@@ -616,6 +637,7 @@ function parseJetRow(r){
     }
   });
   j.jetNo = no;
+  j.images = (r.images && typeof r.images === 'object') ? r.images : {};
   if (!j.id) j.id = uid();
   if (!j.jetType) j.jetType = 'U Jet';
   if (!j.insulation) j.insulation = 'Insulated';

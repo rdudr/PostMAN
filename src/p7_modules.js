@@ -313,7 +313,198 @@ FORMS.jets = function(w){
     { t:'ROI', calc:function(r){ return months(jetTotals(recalcJet(r, S.jetCost)).roi); } }
   ], { addLabel:'+ Add jet', recalc:true }));
   w.appendChild(c);
+
+  var picCard = buildJetPhotoEditor();
+  w.appendChild(picCard);
 };
+
+function buildJetPhotoEditor(){
+  var c = card('Jet Photographs & Images',
+    'Add up to 7 photos for each Jet machine (Body Images 1 & 2, Heat Exchange inlet & outlet, Steam Inlet, Steam Outlet, Trap). Images are neatly formatted on a single page in exported reports. If an image is omitted, its title will not be shown.');
+
+  if (!S.jets || !S.jets.length){
+    c.appendChild(el('div','color:#94a3b8;font-style:italic;padding:12px;','No jet machines available. Import a JET-Eff workbook or add a jet machine above first.'));
+    return c;
+  }
+
+  var selWrap = el('div','margin-bottom:14px;display:flex;align-items:center;gap:8px;');
+  selWrap.appendChild(el('label','font-weight:600;font-size:13px;','Select Jet Machine: '));
+
+  var sel = el('select');
+  sel.style.cssText = 'padding:4px 8px;border-radius:4px;border:1px solid #475569;background:#0f172a;color:#f8fafc;font-weight:bold;';
+  S.jets.forEach(function(j, idx){
+    var op = el('option','', (j.jetNo ? (/^jet/i.test(j.jetNo) ? j.jetNo : 'Jet ' + j.jetNo) : 'Jet #' + (idx+1)));
+    op.value = idx;
+    sel.appendChild(op);
+  });
+
+  var container = el('div');
+  selWrap.appendChild(sel);
+  c.appendChild(selWrap);
+  c.appendChild(container);
+
+  function renderSlots(){
+    clear(container);
+    var jetIdx = parseInt(sel.value, 10) || 0;
+    var jet = S.jets[jetIdx];
+    if (!jet) return;
+    if (!jet.images) jet.images = {};
+
+    var grid = el('div');
+    grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));gap:12px;margin-top:10px;';
+
+    JET_IMAGE_SLOTS.forEach(function(slot){
+      var key = slot.key;
+      var imgUrl = jet.images[key];
+
+      var box = el('div');
+      box.style.cssText = 'background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px;display:flex;flex-direction:column;justify-content:space-between;position:relative;';
+
+      box.onpaste = function(e){
+        var items = e.clipboardData && e.clipboardData.items;
+        if (!items) return;
+        for (var i=0; i<items.length; i++){
+          if (items[i].type.indexOf('image/') === 0){
+            var file = items[i].getAsFile();
+            if (file){
+              e.preventDefault();
+              var r = new FileReader();
+              r.onload = function(ev){
+                openJetCropper(ev.target.result, slot.title, function(croppedUrl){
+                  jet.images[key] = croppedUrl;
+                  save(); drawPreview(); renderSlots();
+                });
+              };
+              r.readAsDataURL(file);
+              return;
+            }
+          }
+        }
+      };
+
+      // Slot Title & Badge
+      var head = el('div');
+      head.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;';
+      var titleSpan = el('span','font-weight:600;font-size:12px;color:#cbd5e1;', slot.title);
+      head.appendChild(titleSpan);
+
+      if (imgUrl){
+        var badge = el('span','font-size:10px;padding:2px 6px;border-radius:10px;background:rgba(34,197,94,0.2);color:#4ade80;font-weight:bold;','✓ Added');
+        head.appendChild(badge);
+      }
+      box.appendChild(head);
+
+      // Thumbnail Area
+      var thumb = el('div');
+      thumb.style.cssText = 'width:100%;height:130px;background:#020617;border-radius:6px;border:1px solid #1e293b;overflow:hidden;display:flex;align-items:center;justify-content:center;position:relative;';
+
+      if (imgUrl){
+        var previewImg = document.createElement('img');
+        previewImg.src = imgUrl;
+        previewImg.style.cssText = 'width:100%;height:100%;object-fit:contain;background:rgba(0,0,0,0.5);';
+        thumb.appendChild(previewImg);
+      } else {
+        var placeholder = el('div');
+        placeholder.style.cssText = 'text-align:center;padding:10px;color:#64748b;';
+        placeholder.appendChild(el('div','font-size:20px;','📷'));
+        placeholder.appendChild(el('div','font-size:11px;font-weight:500;margin-top:2px;','No image added'));
+        placeholder.appendChild(el('div','font-size:10px;color:#475569;','Paste Ctrl+V or upload'));
+        thumb.appendChild(placeholder);
+      }
+      box.appendChild(thumb);
+
+      // Controls Footer
+      var btnRow = el('div');
+      btnRow.style.cssText = 'display:flex;align-items:center;gap:4px;margin-top:8px;';
+
+      // File input
+      var fileLabel = document.createElement('label');
+      fileLabel.style.cssText = 'flex:1;cursor:pointer;';
+      var fileInput = document.createElement('input');
+      fileInput.type = 'file'; fileInput.accept = 'image/*'; fileInput.style.display = 'none';
+      fileInput.onchange = function(e){
+        var file = e.target.files && e.target.files[0];
+        if (file){
+          var r = new FileReader();
+          r.onload = function(ev){
+            openJetCropper(ev.target.result, slot.title, function(croppedUrl){
+              jet.images[key] = croppedUrl;
+              save(); drawPreview(); renderSlots();
+            });
+          };
+          r.readAsDataURL(file);
+        }
+      };
+      fileLabel.appendChild(fileInput);
+      var uploadSpan = el('span','display:flex;align-items:center;justify-content:center;height:26px;background:#1e293b;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;font-weight:500;', imgUrl ? 'Replace' : 'Upload');
+      fileLabel.appendChild(uploadSpan);
+      btnRow.appendChild(fileLabel);
+
+      // Paste button
+      var btnPaste = el('button'); btnPaste.type = 'button'; btnPaste.textContent = 'Paste';
+      btnPaste.style.cssText = 'height:26px;padding:0 8px;background:#1e293b;border:1px solid #334155;border-radius:4px;color:#06b6d4;font-size:11px;cursor:pointer;';
+      btnPaste.onclick = function(){
+        if (navigator.clipboard && navigator.clipboard.read){
+          navigator.clipboard.read().then(function(items){
+            for (var i=0; i<items.length; i++){
+              var type = items[i].types.find(function(t){ return t.indexOf('image/') === 0; });
+              if (type){
+                items[i].getType(type).then(function(blob){
+                  var r = new FileReader();
+                  r.onload = function(ev){
+                    openJetCropper(ev.target.result, slot.title, function(croppedUrl){
+                      jet.images[key] = croppedUrl;
+                      save(); drawPreview(); renderSlots();
+                    });
+                  };
+                  r.readAsDataURL(blob);
+                });
+                return;
+              }
+            }
+            alert('No image found in clipboard');
+          }).catch(function(){
+            alert('Use Ctrl+V while hovering over this slot card to paste an image.');
+          });
+        } else {
+          alert('Use Ctrl+V while hovering over this slot card to paste an image.');
+        }
+      };
+      btnRow.appendChild(btnPaste);
+
+      if (imgUrl){
+        // Crop / Edit button
+        var btnCrop = el('button'); btnCrop.type = 'button'; btnCrop.textContent = 'Crop';
+        btnCrop.style.cssText = 'height:26px;padding:0 8px;background:#0891b2;border:none;border-radius:4px;color:#ffffff;font-size:11px;font-weight:bold;cursor:pointer;';
+        btnCrop.onclick = function(){
+          openJetCropper(imgUrl, slot.title, function(croppedUrl){
+            jet.images[key] = croppedUrl;
+            save(); drawPreview(); renderSlots();
+          });
+        };
+        btnRow.appendChild(btnCrop);
+
+        // Delete button
+        var btnDel = el('button'); btnDel.type = 'button'; btnDel.textContent = '✕';
+        btnDel.style.cssText = 'height:26px;width:24px;background:#991b1b;border:none;border-radius:4px;color:#ffffff;font-size:11px;cursor:pointer;';
+        btnDel.onclick = function(){
+          delete jet.images[key];
+          save(); drawPreview(); renderSlots();
+        };
+        btnRow.appendChild(btnDel);
+      }
+
+      box.appendChild(btnRow);
+      grid.appendChild(box);
+    });
+
+    container.appendChild(grid);
+  }
+
+  sel.onchange = renderSlots;
+  renderSlots();
+  return c;
+}
 
 FORMS.lux = function(w){
   var c = card('Area-wise lux measurement',
