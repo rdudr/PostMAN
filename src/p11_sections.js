@@ -488,14 +488,7 @@ function buildJets(B){
 
 
 
-  /* --- observations ------------------------------------------------- */
-  var obs = jets.filter(function(j){ return j.observation; });
-  if (obs.length){
-    B.push(blk(bH(3,'Observations recorded at the machine')));
-    B.push(tblBlock(['Jet no.','Observation'],
-      obs.map(function(j){ return [/^jet/i.test(j.jetNo) ? j.jetNo : 'Jet ' + j.jetNo, j.observation]; }),
-      { colw:['16%','84%'] }));
-  }
+
 
   /* --- per-jet individual assessment pages & photograph pages ------- */
   jets.forEach(function(j, idx){
