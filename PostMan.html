@@ -4817,35 +4817,7 @@ function buildJets(B){
       { v:months(R.roi), tone:'head' }]]),
     { size:7.8, colw:['12%','12%','12%','13%','15%','14%','12%','10%'] }));
 
-  /* --- per-jet detail, five to a table ------------------------------ */
-  B.push(blk(bH(3,'Performance assessment of jet')));
-  B.push(blk(bP('Each machine is reported against the same spine of measurements, five machines to a table. ' +
-    'A. insulation, B. pump and C. steam trap are the three independent saving streams; the financial block at ' +
-    'the foot of each column adds only the streams that machine actually earns.')));
 
-  for (var start = 0; start < jets.length; start += 5){
-    var grp = jets.slice(start, start + 5);
-    /* The tag the plant uses is already "JET-01"; prefixing it again gives
-       "Jet JET-01" in every column header. */
-    var head = ['Parameter'].concat(grp.map(function(j){
-      return /^jet/i.test(j.jetNo) ? j.jetNo : 'Jet ' + j.jetNo; }));
-    var ncol = head.length;
-    var rows = [];
-    JET_ROWS.forEach(function(spec){
-      if (spec[0] === 'g'){
-        rows.push([{ v:spec[1].toUpperCase(), tone:'head', span:ncol }]);
-      } else {
-        rows.push([spec[1]].concat(grp.map(function(j){ return spec[2](j); })));
-      }
-    });
-    var colw = ['34%'].concat(grp.map(function(){ return (66 / grp.length).toFixed(1) + '%'; }));
-    B.push(tblBlock(head, rows, {
-      size:7.4, colw:colw,
-      title:'Jets ' + (start + 1) + '\u2013' + Math.min(start + 5, jets.length) + ' of ' + jets.length,
-      caption:'* Annual savings computed on the machine\u2019s own recorded operating hours and ' +
-              inr(num(S.jetCost.days) || 350) + ' working days.'
-    }));
-  }
 
   /* --- observations ------------------------------------------------- */
   var obs = jets.filter(function(j){ return j.observation; });
