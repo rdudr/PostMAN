@@ -184,6 +184,115 @@ function bJetGrid(jet){
   return wrap;
 }
 
+function bHeaderChips(chips){
+  var d = el('div','display:flex;flex-wrap:wrap;gap:' + px(4) + ';margin:0 0 ' + px(8) + ';');
+  chips.forEach(function(c){
+    var chip = el('div','background:' + (c.bg || C.tint) + ';border:1px solid ' + (c.border || C.rule) + ';border-radius:' + px(10) + ';padding:' + px(2) + ' ' + px(8) + ';font-size:' + px(8) + ';font-weight:600;color:' + (c.color || C.navy) + ';');
+    chip.textContent = c.label + ': ' + c.value;
+    d.appendChild(chip);
+  });
+  return d;
+}
+
+function bResultBox(label, value, bg, border, textColor){
+  var d = el('div','background:' + (bg || 'rgba(16,185,129,0.1)') + ';border:1px solid ' + (border || '#10b981') + ';border-radius:' + px(3) + ';padding:' + px(5) + ' ' + px(8) + ';margin:' + px(6) + ' 0 ' + px(8) + ';display:flex;align-items:center;justify-content:space-between;');
+  d.appendChild(el('div','font-weight:bold;font-size:' + px(8.5) + ';color:' + (textColor || '#047857') + ';letter-spacing:.04em;', label));
+  d.appendChild(el('div','font-family:' + F.mono + ';font-weight:bold;font-size:' + px(11) + ';color:' + (textColor || '#047857') + ';', value));
+  return d;
+}
+
+function bSavingsCards(jet){
+  var wrap = el('div','display:grid;grid-template-columns:1fr 1fr 1fr;gap:' + px(6) + ';margin:' + px(6) + ' 0 ' + px(8) + ';width:100%;');
+
+  var t1 = jetTotals(jet);
+  var cost = S.jetCost || {};
+
+  function miniCard(title, accentCol, bgCol, rows, strongRows){
+    var c = el('div','border:1px solid ' + accentCol + ';background:' + bgCol + ';border-radius:' + px(3) + ';padding:' + px(5) + ';display:flex;flex-direction:column;justify-content:space-between;');
+    c.appendChild(el('div','font-weight:bold;font-size:' + px(8) + ';color:' + accentCol + ';margin-bottom:' + px(4) + ';text-transform:uppercase;', title));
+
+    var body = el('div','display:flex;flex-direction:column;gap:' + px(2) + ';');
+    rows.forEach(function(r){
+      var row = el('div','display:flex;justify-content:space-between;font-size:' + px(7.2) + ';color:' + C.ink2 + ';');
+      row.appendChild(el('span','', r[0]));
+      row.appendChild(el('span','font-family:' + F.mono + ';font-weight:600;color:' + C.ink1 + ';', r[1]));
+      body.appendChild(row);
+    });
+
+    var divider = el('div','border-top:1px solid ' + accentCol + ';margin:' + px(3) + ' 0;');
+    body.appendChild(divider);
+
+    strongRows.forEach(function(r){
+      var row = el('div','display:flex;justify-content:space-between;font-size:' + px(7.8) + ';font-weight:bold;color:' + accentCol + ';');
+      row.appendChild(el('span','', r[0]));
+      row.appendChild(el('span','font-family:' + F.mono + ';', r[1]));
+      body.appendChild(row);
+    });
+
+    c.appendChild(body);
+    return c;
+  }
+
+  var fv = function(v, unit){ return (v !== null && v !== undefined && v !== '—') ? (v + (unit ? ' ' + unit : '')) : '—'; };
+
+  var card1 = miniCard('1. INSULATION SAVING', '#b45309', 'rgba(245,158,11,0.06)', [
+    ['Steam Saving', fv(fix(num(jet.steamSaving), 2), 'kg/hr')],
+    ['Eq. Coal Saving', fv(fix(num(jet.insEqCoalSaving), 2), 'kg/hr')],
+    ['Annual Fuel Saving', fv(fix(num(jet.insAnnualFuelSaving), 2), 't/yr')],
+    ['Investment', '₹ ' + inr(num(jet.insInvestment))]
+  ], [
+    ['Saving / Year', '₹ ' + inr(num(jet.insMonitoringSaving))],
+    ['ROI', months(jet.insRoiMonths)]
+  ]);
+
+  var card2 = miniCard('2. PUMP REPLACEMENT', '#0891b2', 'rgba(6,182,212,0.06)', [
+    ['Suggestion', jet.pumpSuggestion || (num(jet.pumpEfficiency) !== null && jet.pumpEfficiency < 40 ? 'Replace Pump' : 'Nil')],
+    ['Shaft Power @40%', fv(fix(num(jet.shaftPowerAt40), 2), 'kW')],
+    ['Saving', fv(fix(num(jet.pumpSavingKw), 2), 'kW')],
+    ['Annual Power Saving', fv(inr(num(jet.pumpAnnualPowerSaving)), 'kWh')]
+  ], [
+    ['Saving / Year', '₹ ' + inr(num(jet.pumpMonitoringSaving))],
+    ['ROI', months(jet.pumpRoiMonths)]
+  ]);
+
+  var card3 = miniCard('3. TRAP REPLACEMENT', '#be123c', 'rgba(225,29,72,0.06)', [
+    ['Steam Loss', fv(fix(num(jet.trapEqSteamLoss), 2), 'kg/hr')],
+    ['Eq. Fuel Loss', fv(fix(num(jet.trapEqFuelLoss), 2))],
+    ['Annual Fuel Saving', fv(fix(num(jet.trapAnnualFuelSaving), 2), 't/yr')],
+    ['Investment', '₹ ' + inr(num(cost.trapReplacementCost))]
+  ], [
+    ['Saving / Year', '₹ ' + inr(num(jet.trapMonitoringSaving))],
+    ['ROI', months(jet.trapRoiMonths)]
+  ]);
+
+  wrap.appendChild(card1);
+  wrap.appendChild(card2);
+  wrap.appendChild(card3);
+  return wrap;
+}
+
+function bJetConclusionBox(bullets){
+  var wrap = el('div','background:rgba(16,185,129,0.06);border:1px solid #10b981;border-radius:' + px(3) + ';padding:' + px(6) + ' ' + px(8) + ';margin:0 0 ' + px(8) + ';');
+  wrap.appendChild(el('div','font-weight:bold;font-size:' + px(8.5) + ';color:#047857;margin-bottom:' + px(4) + ';letter-spacing:.04em;','CONCLUSION'));
+
+  var list = el('div','display:flex;flex-direction:column;gap:' + px(2.5) + ';');
+  bullets.forEach(function(b){
+    var row = el('div','display:flex;align-items:flex-start;gap:' + px(4) + ';font-size:' + px(7.8) + ';color:' + C.ink1 + ';');
+    row.appendChild(el('span','color:#10b981;font-weight:bold;','•'));
+    row.appendChild(el('span','flex:1;', b));
+    list.appendChild(row);
+  });
+  wrap.appendChild(list);
+  return wrap;
+}
+
+function bJetObservationBox(text){
+  var wrap = el('div','background:rgba(79,70,229,0.06);border:1px solid #4f46e5;border-radius:' + px(3) + ';padding:' + px(6) + ' ' + px(8) + ';margin:0 0 ' + px(8) + ';');
+  wrap.appendChild(el('div','font-weight:bold;font-size:' + px(8.5) + ';color:#3730a3;margin-bottom:' + px(3) + ';letter-spacing:.04em;','OBSERVATION'));
+  wrap.appendChild(el('div','font-size:' + px(8) + ';color:' + C.ink1 + ';white-space:pre-wrap;line-height:1.4;', text));
+  return wrap;
+}
+
 /* A block is {node, split:false} or a splittable table descriptor. */
 function blk(node, splittable){ return { node:node, split:!!splittable }; }
 function tblBlock(head, rows, opts){

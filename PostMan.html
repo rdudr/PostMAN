@@ -4008,6 +4008,115 @@ function bJetGrid(jet){
   return wrap;
 }
 
+function bHeaderChips(chips){
+  var d = el('div','display:flex;flex-wrap:wrap;gap:' + px(4) + ';margin:0 0 ' + px(8) + ';');
+  chips.forEach(function(c){
+    var chip = el('div','background:' + (c.bg || C.tint) + ';border:1px solid ' + (c.border || C.rule) + ';border-radius:' + px(10) + ';padding:' + px(2) + ' ' + px(8) + ';font-size:' + px(8) + ';font-weight:600;color:' + (c.color || C.navy) + ';');
+    chip.textContent = c.label + ': ' + c.value;
+    d.appendChild(chip);
+  });
+  return d;
+}
+
+function bResultBox(label, value, bg, border, textColor){
+  var d = el('div','background:' + (bg || 'rgba(16,185,129,0.1)') + ';border:1px solid ' + (border || '#10b981') + ';border-radius:' + px(3) + ';padding:' + px(5) + ' ' + px(8) + ';margin:' + px(6) + ' 0 ' + px(8) + ';display:flex;align-items:center;justify-content:space-between;');
+  d.appendChild(el('div','font-weight:bold;font-size:' + px(8.5) + ';color:' + (textColor || '#047857') + ';letter-spacing:.04em;', label));
+  d.appendChild(el('div','font-family:' + F.mono + ';font-weight:bold;font-size:' + px(11) + ';color:' + (textColor || '#047857') + ';', value));
+  return d;
+}
+
+function bSavingsCards(jet){
+  var wrap = el('div','display:grid;grid-template-columns:1fr 1fr 1fr;gap:' + px(6) + ';margin:' + px(6) + ' 0 ' + px(8) + ';width:100%;');
+
+  var t1 = jetTotals(jet);
+  var cost = S.jetCost || {};
+
+  function miniCard(title, accentCol, bgCol, rows, strongRows){
+    var c = el('div','border:1px solid ' + accentCol + ';background:' + bgCol + ';border-radius:' + px(3) + ';padding:' + px(5) + ';display:flex;flex-direction:column;justify-content:space-between;');
+    c.appendChild(el('div','font-weight:bold;font-size:' + px(8) + ';color:' + accentCol + ';margin-bottom:' + px(4) + ';text-transform:uppercase;', title));
+
+    var body = el('div','display:flex;flex-direction:column;gap:' + px(2) + ';');
+    rows.forEach(function(r){
+      var row = el('div','display:flex;justify-content:space-between;font-size:' + px(7.2) + ';color:' + C.ink2 + ';');
+      row.appendChild(el('span','', r[0]));
+      row.appendChild(el('span','font-family:' + F.mono + ';font-weight:600;color:' + C.ink1 + ';', r[1]));
+      body.appendChild(row);
+    });
+
+    var divider = el('div','border-top:1px solid ' + accentCol + ';margin:' + px(3) + ' 0;');
+    body.appendChild(divider);
+
+    strongRows.forEach(function(r){
+      var row = el('div','display:flex;justify-content:space-between;font-size:' + px(7.8) + ';font-weight:bold;color:' + accentCol + ';');
+      row.appendChild(el('span','', r[0]));
+      row.appendChild(el('span','font-family:' + F.mono + ';', r[1]));
+      body.appendChild(row);
+    });
+
+    c.appendChild(body);
+    return c;
+  }
+
+  var fv = function(v, unit){ return (v !== null && v !== undefined && v !== '\u2014') ? (v + (unit ? ' ' + unit : '')) : '\u2014'; };
+
+  var card1 = miniCard('1. INSULATION SAVING', '#b45309', 'rgba(245,158,11,0.06)', [
+    ['Steam Saving', fv(fix(num(jet.steamSaving), 2), 'kg/hr')],
+    ['Eq. Coal Saving', fv(fix(num(jet.insEqCoalSaving), 2), 'kg/hr')],
+    ['Annual Fuel Saving', fv(fix(num(jet.insAnnualFuelSaving), 2), 't/yr')],
+    ['Investment', '\u20B9 ' + inr(num(jet.insInvestment))]
+  ], [
+    ['Saving / Year', '\u20B9 ' + inr(num(jet.insMonitoringSaving))],
+    ['ROI', months(jet.insRoiMonths)]
+  ]);
+
+  var card2 = miniCard('2. PUMP REPLACEMENT', '#0891b2', 'rgba(6,182,212,0.06)', [
+    ['Suggestion', jet.pumpSuggestion || (num(jet.pumpEfficiency) !== null && jet.pumpEfficiency < 40 ? 'Replace Pump' : 'Nil')],
+    ['Shaft Power @40%', fv(fix(num(jet.shaftPowerAt40), 2), 'kW')],
+    ['Saving', fv(fix(num(jet.pumpSavingKw), 2), 'kW')],
+    ['Annual Power Saving', fv(inr(num(jet.pumpAnnualPowerSaving)), 'kWh')]
+  ], [
+    ['Saving / Year', '\u20B9 ' + inr(num(jet.pumpMonitoringSaving))],
+    ['ROI', months(jet.pumpRoiMonths)]
+  ]);
+
+  var card3 = miniCard('3. TRAP REPLACEMENT', '#be123c', 'rgba(225,29,72,0.06)', [
+    ['Steam Loss', fv(fix(num(jet.trapEqSteamLoss), 2), 'kg/hr')],
+    ['Eq. Fuel Loss', fv(fix(num(jet.trapEqFuelLoss), 2))],
+    ['Annual Fuel Saving', fv(fix(num(jet.trapAnnualFuelSaving), 2), 't/yr')],
+    ['Investment', '\u20B9 ' + inr(num(cost.trapReplacementCost))]
+  ], [
+    ['Saving / Year', '\u20B9 ' + inr(num(jet.trapMonitoringSaving))],
+    ['ROI', months(jet.trapRoiMonths)]
+  ]);
+
+  wrap.appendChild(card1);
+  wrap.appendChild(card2);
+  wrap.appendChild(card3);
+  return wrap;
+}
+
+function bJetConclusionBox(bullets){
+  var wrap = el('div','background:rgba(16,185,129,0.06);border:1px solid #10b981;border-radius:' + px(3) + ';padding:' + px(6) + ' ' + px(8) + ';margin:0 0 ' + px(8) + ';');
+  wrap.appendChild(el('div','font-weight:bold;font-size:' + px(8.5) + ';color:#047857;margin-bottom:' + px(4) + ';letter-spacing:.04em;','CONCLUSION'));
+
+  var list = el('div','display:flex;flex-direction:column;gap:' + px(2.5) + ';');
+  bullets.forEach(function(b){
+    var row = el('div','display:flex;align-items:flex-start;gap:' + px(4) + ';font-size:' + px(7.8) + ';color:' + C.ink1 + ';');
+    row.appendChild(el('span','color:#10b981;font-weight:bold;','\u2022'));
+    row.appendChild(el('span','flex:1;', b));
+    list.appendChild(row);
+  });
+  wrap.appendChild(list);
+  return wrap;
+}
+
+function bJetObservationBox(text){
+  var wrap = el('div','background:rgba(79,70,229,0.06);border:1px solid #4f46e5;border-radius:' + px(3) + ';padding:' + px(6) + ' ' + px(8) + ';margin:0 0 ' + px(8) + ';');
+  wrap.appendChild(el('div','font-weight:bold;font-size:' + px(8.5) + ';color:#3730a3;margin-bottom:' + px(3) + ';letter-spacing:.04em;','OBSERVATION'));
+  wrap.appendChild(el('div','font-size:' + px(8) + ';color:' + C.ink1 + ';white-space:pre-wrap;line-height:1.4;', text));
+  return wrap;
+}
+
 /* A block is {node, split:false} or a splittable table descriptor. */
 function blk(node, splittable){ return { node:node, split:!!splittable }; }
 function tblBlock(head, rows, opts){
@@ -4747,21 +4856,101 @@ function buildJets(B){
       { colw:['16%','84%'] }));
   }
 
-  /* --- per-jet photographs (single page per jet with images) --------- */
-  var jetsWithImages = jets.filter(function(j){
-    return j.images && Object.keys(j.images).some(function(k){ return j.images[k]; });
-  });
+  /* --- per-jet individual assessment pages & photograph pages ------- */
+  jets.forEach(function(j, idx){
+    var jetTitle = j.jetNo ? (/^jet/i.test(j.jetNo) ? j.jetNo : 'Jet ' + j.jetNo) : ('Jet ' + (idx + 1));
+    var t = jetTotals(j);
 
-  if (jetsWithImages.length){
-    jetsWithImages.forEach(function(j){
-      var attached = JET_IMAGE_SLOTS.filter(function(s){ return j.images && j.images[s.key]; });
-      if (attached.length){
-        B.push({ node: el('div'), split: false, hardBreak: true });
-        B.push(blk(bH(3, (j.jetNo ? (/^jet/i.test(j.jetNo) ? j.jetNo : 'Jet ' + j.jetNo) : 'Jet') + ' \u2014 Photographs & Images')));
-        B.push(blk(bJetGrid(j)));
-      }
-    });
-  }
+    // Hard page break for individual jet assessment page
+    B.push({ node: el('div'), split: false, hardBreak: true });
+    B.push(blk(bH(3, jetTitle + ' \u2014 Individual Performance Assessment')));
+
+    // Header Chips
+    B.push(blk(bHeaderChips([
+      { label:'Capacity', value: (j.capacity || '\u2014') + ' kg' },
+      { label:'Process', value: j.operation || '\u2014' },
+      { label:'Set Temp', value: (j.jetTemp ? j.jetTemp + ' \u00B0C' : '\u2014') },
+      { label:'Insulation', value: j.insulation || '\u2014', color: j.insulation === 'UnInsulated' ? '#b91c1c' : '#0369a1' },
+      { label:'Trap Status', value: j.trapStatus || '\u2014', color: j.trapStatus === 'Trap Passing' ? '#b91c1c' : '#047857' }
+    ])));
+
+    // Detailed Performance Parameters
+    B.push(tblBlock(['Parameter', 'Measured / Calculated Value', 'Unit'], [
+      [{v:'PUMP PERFORMANCE', tone:'head', span:3}],
+      ['Jet circulation flow', fix(num(j.flow), 1), 'CMH'],
+      ['Pump pressure', fix(num(j.pressure), 2), 'kg/cm\u00B2'],
+      ['Power input to jet', fix(num(j.pumpPower), 2), 'kW'],
+      ['Hydraulic power', fix(num(j.hydraulicPower), 2), 'kW'],
+      ['Pump efficiency', { v: fix(num(j.pumpEfficiency), 1), tone: (num(j.pumpEfficiency) !== null && num(j.pumpEfficiency) < 40) ? 'bad' : 'ok' }, '%'],
+      ['Power saving at min 40% eff.', fix(num(j.pumpSavingKw), 2), 'kW'],
+      ['Annual power saving', inr(num(j.pumpAnnualPowerSaving)), 'kWh/yr'],
+      ['Annual pump monetary saving', inr(num(j.pumpMonitoringSaving)), '\u20B9/yr'],
+
+      [{v:'SURFACE HEAT LOSS & INSULATION', tone:'head', span:3}],
+      ['Average body temperature', fix(num(j.avgBodyTemp), 1), '\u00B0C'],
+      ['Ambient temperature', fix(num(j.ambientTemp), 1), '\u00B0C'],
+      ['Surface heat loss', inr(num(j.totalSurfaceHeatLoss)), 'kCal/hr'],
+      ['Steam pressure', fix(num(j.steamPressure), 1), 'kg/cm\u00B2'],
+      ['Eq. steam loss', fix(num(j.eqSteamLoss), 2), 'kg/hr'],
+      ['Post insulation body temp', fix(num(j.insulationBodyTemp), 1), '\u00B0C'],
+      ['Coal / fuel saving', fix(num(j.insEqCoalSaving), 3), 'kg/hr'],
+      ['Annual fuel saving', fix(num(j.insAnnualFuelSaving), 2), 'Tonne/yr'],
+      ['Annual insulation monetary saving', inr(num(j.insMonitoringSaving)), '\u20B9/yr'],
+
+      [{v:'STEAM TRAP & HEAT EXCHANGER', tone:'head', span:3}],
+      ['Steam trap type', j.trapType || '\u2014', '\u2014'],
+      ['Trap temperature in / out', fix(num(j.trapTempIn), 1) + ' / ' + fix(num(j.trapTempOut), 1), '\u00B0C'],
+      ['Trap working status', { v: j.trapStatus || '\u2014', tone: j.trapStatus === 'Trap Passing' ? 'bad' : 'ok' }, '\u2014'],
+      ['Trap steam loss', fix(num(j.trapEqSteamLoss), 2), 'kg/hr'],
+      ['Annual trap monetary saving', inr(num(j.trapMonitoringSaving)), '\u20B9/yr'],
+      ['Heat exchanger steam flow', fix(num(j.totalSteamUsed) || num(j.eqSteamUsed), 2), 'kg/hr'],
+      ['Heat exchange efficiency', fix(num(j.operation === 'Cooling' ? j.coolingOption : j.jetExchangeEfficiency), 1), '%']
+    ], { size: 7.2, colw: ['48%', '34%', '18%'] }));
+
+    // Green Highlight Box for Steam Saving
+    if (num(j.steamSaving) > 0 || num(j.insMonitoringSaving) > 0){
+      B.push(blk(bResultBox(
+        'SAVING IN STEAM CONSUMPTION',
+        fix(num(j.steamSaving), 2) + ' kg/hr  (\u20B9 ' + inr(num(j.insMonitoringSaving)) + ' / year)',
+        'rgba(16,185,129,0.08)', '#10b981', '#047857'
+      )));
+    }
+
+    // 3 Savings Cards
+    B.push(blk(bSavingsCards(j)));
+
+    // Conclusion Box
+    var bullets = [];
+    if (num(j.steamSaving) > 0) {
+      bullets.push('Insulation: Applying standard LRB insulation saves ' + fix(num(j.steamSaving), 1) + ' kg/hr steam, worth \u20B9 ' + inr(num(j.insMonitoringSaving)) + '/year.');
+    } else {
+      bullets.push('Insulation: Current insulation condition is ' + (j.insulation || 'Insulated') + '; no extra surface insulation saving derived.');
+    }
+
+    if (num(j.pumpEfficiency) !== null && num(j.pumpEfficiency) < 40) {
+      bullets.push('Pump Performance: Pump efficiency is low (' + fix(num(j.pumpEfficiency), 1) + '% < 40%). Replacement saves ' + fix(num(j.pumpSavingKw), 1) + ' kW worth \u20B9 ' + inr(num(j.pumpMonitoringSaving)) + '/year.');
+    } else {
+      bullets.push('Pump Performance: Circulation pump efficiency is ' + (num(j.pumpEfficiency) !== null ? fix(num(j.pumpEfficiency), 1) + '%' : 'satisfactory') + '.');
+    }
+
+    if (j.trapStatus === 'Trap Passing') {
+      bullets.push('Steam Trap: Steam trap is passing live steam to drain (loss: ' + fix(num(j.trapEqSteamLoss), 1) + ' kg/hr). Replacement saves \u20B9 ' + inr(num(j.trapMonitoringSaving)) + '/year.');
+    } else {
+      bullets.push('Steam Trap: Steam trap status is ' + (j.trapStatus || 'Normal working') + '.');
+    }
+    B.push(blk(bJetConclusionBox(bullets)));
+
+    // Observation Box
+    B.push(blk(bJetObservationBox(j.observation || 'No specific anomalies observed for ' + jetTitle + '.')));
+
+    // Photo Grid Page (if attached images exist)
+    var attached = JET_IMAGE_SLOTS.filter(function(s){ return j.images && j.images[s.key]; });
+    if (attached.length){
+      B.push({ node: el('div'), split: false, hardBreak: true });
+      B.push(blk(bH(3, jetTitle + ' \u2014 Photographs & Images')));
+      B.push(blk(bJetGrid(j)));
+    }
+  });
 
   if (S.jetThermal && S.jetThermal.length){
     B.push(blk(bH(3,'Thermal imaging of jet')));

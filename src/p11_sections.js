@@ -525,21 +525,101 @@ function buildJets(B){
       { colw:['16%','84%'] }));
   }
 
-  /* --- per-jet photographs (single page per jet with images) --------- */
-  var jetsWithImages = jets.filter(function(j){
-    return j.images && Object.keys(j.images).some(function(k){ return j.images[k]; });
-  });
+  /* --- per-jet individual assessment pages & photograph pages ------- */
+  jets.forEach(function(j, idx){
+    var jetTitle = j.jetNo ? (/^jet/i.test(j.jetNo) ? j.jetNo : 'Jet ' + j.jetNo) : ('Jet ' + (idx + 1));
+    var t = jetTotals(j);
 
-  if (jetsWithImages.length){
-    jetsWithImages.forEach(function(j){
-      var attached = JET_IMAGE_SLOTS.filter(function(s){ return j.images && j.images[s.key]; });
-      if (attached.length){
-        B.push({ node: el('div'), split: false, hardBreak: true });
-        B.push(blk(bH(3, (j.jetNo ? (/^jet/i.test(j.jetNo) ? j.jetNo : 'Jet ' + j.jetNo) : 'Jet') + ' — Photographs & Images')));
-        B.push(blk(bJetGrid(j)));
-      }
-    });
-  }
+    // Hard page break for individual jet assessment page
+    B.push({ node: el('div'), split: false, hardBreak: true });
+    B.push(blk(bH(3, jetTitle + ' — Individual Performance Assessment')));
+
+    // Header Chips
+    B.push(blk(bHeaderChips([
+      { label:'Capacity', value: (j.capacity || '—') + ' kg' },
+      { label:'Process', value: j.operation || '—' },
+      { label:'Set Temp', value: (j.jetTemp ? j.jetTemp + ' °C' : '—') },
+      { label:'Insulation', value: j.insulation || '—', color: j.insulation === 'UnInsulated' ? '#b91c1c' : '#0369a1' },
+      { label:'Trap Status', value: j.trapStatus || '—', color: j.trapStatus === 'Trap Passing' ? '#b91c1c' : '#047857' }
+    ])));
+
+    // Detailed Performance Parameters
+    B.push(tblBlock(['Parameter', 'Measured / Calculated Value', 'Unit'], [
+      [{v:'PUMP PERFORMANCE', tone:'head', span:3}],
+      ['Jet circulation flow', fix(num(j.flow), 1), 'CMH'],
+      ['Pump pressure', fix(num(j.pressure), 2), 'kg/cm²'],
+      ['Power input to jet', fix(num(j.pumpPower), 2), 'kW'],
+      ['Hydraulic power', fix(num(j.hydraulicPower), 2), 'kW'],
+      ['Pump efficiency', { v: fix(num(j.pumpEfficiency), 1), tone: (num(j.pumpEfficiency) !== null && num(j.pumpEfficiency) < 40) ? 'bad' : 'ok' }, '%'],
+      ['Power saving at min 40% eff.', fix(num(j.pumpSavingKw), 2), 'kW'],
+      ['Annual power saving', inr(num(j.pumpAnnualPowerSaving)), 'kWh/yr'],
+      ['Annual pump monetary saving', inr(num(j.pumpMonitoringSaving)), '₹/yr'],
+
+      [{v:'SURFACE HEAT LOSS & INSULATION', tone:'head', span:3}],
+      ['Average body temperature', fix(num(j.avgBodyTemp), 1), '°C'],
+      ['Ambient temperature', fix(num(j.ambientTemp), 1), '°C'],
+      ['Surface heat loss', inr(num(j.totalSurfaceHeatLoss)), 'kCal/hr'],
+      ['Steam pressure', fix(num(j.steamPressure), 1), 'kg/cm²'],
+      ['Eq. steam loss', fix(num(j.eqSteamLoss), 2), 'kg/hr'],
+      ['Post insulation body temp', fix(num(j.insulationBodyTemp), 1), '°C'],
+      ['Coal / fuel saving', fix(num(j.insEqCoalSaving), 3), 'kg/hr'],
+      ['Annual fuel saving', fix(num(j.insAnnualFuelSaving), 2), 'Tonne/yr'],
+      ['Annual insulation monetary saving', inr(num(j.insMonitoringSaving)), '₹/yr'],
+
+      [{v:'STEAM TRAP & HEAT EXCHANGER', tone:'head', span:3}],
+      ['Steam trap type', j.trapType || '—', '—'],
+      ['Trap temperature in / out', fix(num(j.trapTempIn), 1) + ' / ' + fix(num(j.trapTempOut), 1), '°C'],
+      ['Trap working status', { v: j.trapStatus || '—', tone: j.trapStatus === 'Trap Passing' ? 'bad' : 'ok' }, '—'],
+      ['Trap steam loss', fix(num(j.trapEqSteamLoss), 2), 'kg/hr'],
+      ['Annual trap monetary saving', inr(num(j.trapMonitoringSaving)), '₹/yr'],
+      ['Heat exchanger steam flow', fix(num(j.totalSteamUsed) || num(j.eqSteamUsed), 2), 'kg/hr'],
+      ['Heat exchange efficiency', fix(num(j.operation === 'Cooling' ? j.coolingOption : j.jetExchangeEfficiency), 1), '%']
+    ], { size: 7.2, colw: ['48%', '34%', '18%'] }));
+
+    // Green Highlight Box for Steam Saving
+    if (num(j.steamSaving) > 0 || num(j.insMonitoringSaving) > 0){
+      B.push(blk(bResultBox(
+        'SAVING IN STEAM CONSUMPTION',
+        fix(num(j.steamSaving), 2) + ' kg/hr  (₹ ' + inr(num(j.insMonitoringSaving)) + ' / year)',
+        'rgba(16,185,129,0.08)', '#10b981', '#047857'
+      )));
+    }
+
+    // 3 Savings Cards
+    B.push(blk(bSavingsCards(j)));
+
+    // Conclusion Box
+    var bullets = [];
+    if (num(j.steamSaving) > 0) {
+      bullets.push('Insulation: Applying standard LRB insulation saves ' + fix(num(j.steamSaving), 1) + ' kg/hr steam, worth ₹ ' + inr(num(j.insMonitoringSaving)) + '/year.');
+    } else {
+      bullets.push('Insulation: Current insulation condition is ' + (j.insulation || 'Insulated') + '; no extra surface insulation saving derived.');
+    }
+
+    if (num(j.pumpEfficiency) !== null && num(j.pumpEfficiency) < 40) {
+      bullets.push('Pump Performance: Pump efficiency is low (' + fix(num(j.pumpEfficiency), 1) + '% < 40%). Replacement saves ' + fix(num(j.pumpSavingKw), 1) + ' kW worth ₹ ' + inr(num(j.pumpMonitoringSaving)) + '/year.');
+    } else {
+      bullets.push('Pump Performance: Circulation pump efficiency is ' + (num(j.pumpEfficiency) !== null ? fix(num(j.pumpEfficiency), 1) + '%' : 'satisfactory') + '.');
+    }
+
+    if (j.trapStatus === 'Trap Passing') {
+      bullets.push('Steam Trap: Steam trap is passing live steam to drain (loss: ' + fix(num(j.trapEqSteamLoss), 1) + ' kg/hr). Replacement saves ₹ ' + inr(num(j.trapMonitoringSaving)) + '/year.');
+    } else {
+      bullets.push('Steam Trap: Steam trap status is ' + (j.trapStatus || 'Normal working') + '.');
+    }
+    B.push(blk(bJetConclusionBox(bullets)));
+
+    // Observation Box
+    B.push(blk(bJetObservationBox(j.observation || 'No specific anomalies observed for ' + jetTitle + '.')));
+
+    // Photo Grid Page (if attached images exist)
+    var attached = JET_IMAGE_SLOTS.filter(function(s){ return j.images && j.images[s.key]; });
+    if (attached.length){
+      B.push({ node: el('div'), split: false, hardBreak: true });
+      B.push(blk(bH(3, jetTitle + ' — Photographs & Images')));
+      B.push(blk(bJetGrid(j)));
+    }
+  });
 
   if (S.jetThermal && S.jetThermal.length){
     B.push(blk(bH(3,'Thermal imaging of jet')));
