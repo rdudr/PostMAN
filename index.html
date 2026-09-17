@@ -1873,6 +1873,63 @@ FORMS.pumps = function(w){
 };
 
 FORMS.jets = function(w){
+  // \u2500\u2500 Import / Manual Option Banner \u2500\u2500
+  var bannerCard = card('Jet Efficiency \u2014 Input Method',
+    'Choose how to populate Jet machine assessment data. You can import an Excel file (.xlsx) exported from the JET EFF app / template, or add & edit records manually below.');
+
+  var bannerBox = el('div');
+  bannerBox.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;';
+
+  // Option A: Import Excel File
+  var optImport = el('div');
+  optImport.style.cssText = 'flex:1;min-width:260px;background:#0f172a;border:1px solid #0891b2;border-radius:8px;padding:12px;display:flex;flex-direction:column;justify-content:space-between;';
+  optImport.appendChild(el('div','font-size:13px;font-weight:bold;color:#67e8f9;margin-bottom:4px;','Option 1: Import JET EFF Excel File'));
+  optImport.appendChild(el('div','font-size:11px;color:#94a3b8;margin-bottom:10px;','Upload a .xlsx workbook exported from JET EFF containing company profile & Jet Data sheets.'));
+
+  var fileLabel = document.createElement('label');
+  fileLabel.style.cssText = 'cursor:pointer;display:inline-block;';
+  var fileInput = document.createElement('input');
+  fileInput.type = 'file'; fileInput.accept = '.xlsx,.xls,.csv'; fileInput.style.display = 'none';
+  fileInput.onchange = function(e){
+    var file = e.target.files && e.target.files[0];
+    if (file){
+      var r = new FileReader();
+      r.onload = function(ev){
+        try {
+          var wb = XLSX.read(ev.target.result, { type:'array' });
+          var log = importJetEff(wb);
+          save(); renderAll();
+          alert('Excel imported successfully:\n\n' + log.join('\n'));
+        } catch(err) {
+          alert('Error importing Excel file: ' + err.message);
+        }
+      };
+      r.readAsArrayBuffer(file);
+    }
+  };
+  fileLabel.appendChild(fileInput);
+  var btnImp = el('span','display:inline-flex;align-items:center;justify-content:center;height:32px;padding:0 14px;background:#0891b2;border-radius:6px;color:#ffffff;font-size:12px;font-weight:bold;','\u1F4E5 Choose & Import Excel File');
+  fileLabel.appendChild(btnImp);
+  optImport.appendChild(fileLabel);
+
+  // Option B: Add Manually
+  var optManual = el('div');
+  optManual.style.cssText = 'flex:1;min-width:260px;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;display:flex;flex-direction:column;justify-content:space-between;';
+  optManual.appendChild(el('div','font-size:13px;font-weight:bold;color:#f8fafc;margin-bottom:4px;','Option 2: Add / Edit Data Manually'));
+  optManual.appendChild(el('div','font-size:11px;color:#94a3b8;margin-bottom:10px;','Type jet measurements directly into the table below or click "+ Add jet" to add new rows.'));
+  var btnMan = el('button'); btnMan.type = 'button'; btnMan.textContent = '\u270F\uFE0F Edit / Add Manually Below';
+  btnMan.style.cssText = 'height:32px;padding:0 14px;background:#1e293b;border:1px solid #475569;border-radius:6px;color:#cbd5e1;font-size:12px;font-weight:bold;cursor:pointer;';
+  btnMan.onclick = function(){
+    var target = document.querySelector('.table-editor') || document.querySelector('.card');
+    if (target) target.scrollIntoView({ behavior:'smooth' });
+  };
+  optManual.appendChild(btnMan);
+
+  bannerBox.appendChild(optImport);
+  bannerBox.appendChild(optManual);
+  bannerCard.appendChild(bannerBox);
+  w.appendChild(bannerCard);
+
   var cc = card('Jet costing parameters',
     'These are JET-Eff\u2019s own six cost fields. They arrive with an imported workbook and can be overridden here; every jet is recomputed and the ledger rewritten the moment one changes, so the report can never quote a rate it did not use.');
   cc.appendChild(gridOf([
