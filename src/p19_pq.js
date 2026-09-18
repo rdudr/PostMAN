@@ -399,7 +399,7 @@ function recSummaryBlocks(B, rec){
   if (s.pf && s.pf.avg < 0.95) flags.push('average power factor of ' + fix(s.pf.avg, 3) + ' is below 0.95');
   B.push(blk(flags.length ? bNote('Observation: ' + flags.join('; ') + '.', 'bad') : bNote('Observation: voltage THD, current THD and power factor all within limits over the recording.', 'ok')));
   recCharts(rec, 'pfuc').forEach(function(c){ B.push(blk(bChart(c[1]))); });
-  B.push(blk(bP('Voltage, current and harmonic-order charts for this recording are in the annexure.', { size:9, italic:true })));
+  if (!(rec.charts && rec.charts.length)) B.push(blk(bP('Voltage, current and harmonic-order charts for this recording are in the annexure.', { size:9, italic:true })));
 }
 function panelTable(B, p){
   var thd = function(v, lim){ return v === null ? '—' : { v:fix(v), tone:(v > lim ? 'bad' : null) }; };
@@ -555,13 +555,14 @@ function buildDistSection(B){
 /* --- Annexure: the full measurement charts of every recording --- */
 function buildPqAnnexure(B){
   pqState();
-  if (!S.pq.recordings.length) return;
+  var annexed = S.pq.recordings.filter(function(r){ return typeof pqInAnnexure !== 'function' || pqInAnnexure(r); });
+  if (!annexed.length) return;
   B.push({ node:el('div'), split:false, hardBreak:true });
   B.push(blk(bH(1,'Annexure A — Power quality measurement charts')));
   B.push(blk(bP('The complete recorded trends for every power quality recording referred to in the electrical distribution chapter, in the order the panels appear there: plant main inputs first, then PCC panels, then MCC panels.')));
   var order = { main:0, pcc:1, mcc:2, motor:3, other:4 };
   var rank = function(r){ return order.hasOwnProperty(r.role) ? order[r.role] : 9; };
-  S.pq.recordings.slice().sort(function(a, b){ return rank(a) - rank(b); }).forEach(function(rec, i){
+  annexed.slice().sort(function(a, b){ return rank(a) - rank(b); }).forEach(function(rec, i){
     var roleName = { main:'Plant main input', pcc:'PCC panel', mcc:'MCC panel', motor:'Motor', other:'Recording' }[rec.role] || 'Recording';
     B.push(blk(bH(2, 'A.' + (i + 1) + ' ' + roleName + ' — ' + (rec.panel || rec.name) + (rec.recId ? ' (' + rec.recId + ')' : ''))));
     B.push(blk(bP((rec.instrument ? rec.instrument + '. ' : '') + (rec.start ? 'Recorded ' + rec.start + ' to ' + rec.end + ', ' : '') + inr(rec.samples) + ' samples.' + (rec.engineer ? ' Exported by ' + rec.engineer + (rec.exportedAt ? ' on ' + rec.exportedAt : '') + '.' : ''), { size:9.5, italic:true })));
@@ -618,6 +619,7 @@ FORMS.dist = function(w){
       box.appendChild(el('div','font-size:12px;color:var(--ink-2);margin-top:6px;font-family:"IBM Plex Mono",monospace;',
         'avg ' + (s.v ? fix(s.v.avg, 1) + ' V' : '') + (s.i ? ' · ' + fix(s.i.avg, 1) + ' A' : '') + (s.kw ? ' · ' + fix(s.kw.avg, 1) + ' kW' : '') +
         (s.pf ? ' · PF ' + fix(s.pf.avg, 3) : '') + (s.vthd ? ' · VTHD ' + fix(s.vthd.avg) + ' %' : '') + (s.ithd ? ' · ITHD ' + fix(s.ithd.avg) + ' %' : '')));
+      if (rec.bundle) box.appendChild(pqCostCard(rec));
       w.appendChild(box);
       c2.appendChild(box);
     });

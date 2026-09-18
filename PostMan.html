@@ -7207,7 +7207,7 @@ function recSummaryBlocks(B, rec){
   if (s.pf && s.pf.avg < 0.95) flags.push('average power factor of ' + fix(s.pf.avg, 3) + ' is below 0.95');
   B.push(blk(flags.length ? bNote('Observation: ' + flags.join('; ') + '.', 'bad') : bNote('Observation: voltage THD, current THD and power factor all within limits over the recording.', 'ok')));
   recCharts(rec, 'pfuc').forEach(function(c){ B.push(blk(bChart(c[1]))); });
-  B.push(blk(bP('Voltage, current and harmonic-order charts for this recording are in the annexure.', { size:9, italic:true })));
+  if (!(rec.charts && rec.charts.length)) B.push(blk(bP('Voltage, current and harmonic-order charts for this recording are in the annexure.', { size:9, italic:true })));
 }
 function panelTable(B, p){
   var thd = function(v, lim){ return v === null ? '\u2014' : { v:fix(v), tone:(v > lim ? 'bad' : null) }; };
@@ -7363,13 +7363,14 @@ function buildDistSection(B){
 /* --- Annexure: the full measurement charts of every recording --- */
 function buildPqAnnexure(B){
   pqState();
-  if (!S.pq.recordings.length) return;
+  var annexed = S.pq.recordings.filter(function(r){ return typeof pqInAnnexure !== 'function' || pqInAnnexure(r); });
+  if (!annexed.length) return;
   B.push({ node:el('div'), split:false, hardBreak:true });
   B.push(blk(bH(1,'Annexure A \u2014 Power quality measurement charts')));
   B.push(blk(bP('The complete recorded trends for every power quality recording referred to in the electrical distribution chapter, in the order the panels appear there: plant main inputs first, then PCC panels, then MCC panels.')));
   var order = { main:0, pcc:1, mcc:2, motor:3, other:4 };
   var rank = function(r){ return order.hasOwnProperty(r.role) ? order[r.role] : 9; };
-  S.pq.recordings.slice().sort(function(a, b){ return rank(a) - rank(b); }).forEach(function(rec, i){
+  annexed.slice().sort(function(a, b){ return rank(a) - rank(b); }).forEach(function(rec, i){
     var roleName = { main:'Plant main input', pcc:'PCC panel', mcc:'MCC panel', motor:'Motor', other:'Recording' }[rec.role] || 'Recording';
     B.push(blk(bH(2, 'A.' + (i + 1) + ' ' + roleName + ' \u2014 ' + (rec.panel || rec.name) + (rec.recId ? ' (' + rec.recId + ')' : ''))));
     B.push(blk(bP((rec.instrument ? rec.instrument + '. ' : '') + (rec.start ? 'Recorded ' + rec.start + ' to ' + rec.end + ', ' : '') + inr(rec.samples) + ' samples.' + (rec.engineer ? ' Exported by ' + rec.engineer + (rec.exportedAt ? ' on ' + rec.exportedAt : '') + '.' : ''), { size:9.5, italic:true })));
@@ -7426,6 +7427,7 @@ FORMS.dist = function(w){
       box.appendChild(el('div','font-size:12px;color:var(--ink-2);margin-top:6px;font-family:"IBM Plex Mono",monospace;',
         'avg ' + (s.v ? fix(s.v.avg, 1) + ' V' : '') + (s.i ? ' \u00B7 ' + fix(s.i.avg, 1) + ' A' : '') + (s.kw ? ' \u00B7 ' + fix(s.kw.avg, 1) + ' kW' : '') +
         (s.pf ? ' \u00B7 PF ' + fix(s.pf.avg, 3) : '') + (s.vthd ? ' \u00B7 VTHD ' + fix(s.vthd.avg) + ' %' : '') + (s.ithd ? ' \u00B7 ITHD ' + fix(s.ithd.avg) + ' %' : '')));
+      if (rec.bundle) box.appendChild(pqCostCard(rec));
       w.appendChild(box);
       c2.appendChild(box);
     });
@@ -7603,34 +7605,140 @@ function pqPullCard(w){
 var PQ_TONE = { pass:'ok', warn:'watch', fail:'bad', good:'ok', fair:'watch', poor:'bad' };
 var PQ_VERDICT = { pass:'Pass', warn:'Marginal', fail:'Fail' };
 
-/* Standards compliance, grouped by standard, with the analyser's remark. */
+/* Standards compliance, laid out as the analyser's own audit PDF lays it
+   out: a headline band, then one table per standard with what it checks,
+   how many of its clauses pass, and each clause's measured value, limit,
+   verdict and the analyser's remark. */
 function pqComplianceBlocks(B, rec){
   var cmp = rec.compliance; if (!cmp || !cmp.rules || !cmp.rules.length) return;
   var sm = cmp.summary || {};
   B.push(blk(bH(3, 'Standards compliance \u2014 ' + (rec.recId || rec.name))));
+  B.push(blk(bP('Evaluated by the AI power quality analyser against IEEE 519, EN 50160, IEC 61000-3-14 and utility power-factor norms over the whole recording (' + inr(rec.samples) + ' samples). A marginal result counts as half a pass in the score.', { size:9.5 })));
   B.push(blk(bKPI([
-    ['Compliance score', (sm.score !== undefined ? sm.score : '\u2014') + ' %'],
+    ['Overall compliance', (sm.score !== undefined ? sm.score : '\u2014') + ' %'], ['Checks', String(sm.total || cmp.rules.length)],
     ['Pass', String(sm.pass || 0)], ['Marginal', String(sm.warn || 0)], ['Fail', String(sm.fail || 0)]
   ])));
-  var rows = cmp.rules.map(function(r){
-    var d = r.unit === 'V' || r.unit === 'Hz' ? 2 : r.unit === '' ? 3 : 2;
-    return [r.standard, r.clause, fix(r.measured, d) + (r.unit ? ' ' + r.unit : ''), fix(r.limit, r.unit === '' ? 2 : 0) + (r.unit ? ' ' + r.unit : ''),
-      { v:PQ_VERDICT[r.verdict] || r.verdict, tone:PQ_TONE[r.verdict] || null }, r.remark];
+  /* group by standard, in the analyser's order */
+  var groups = [], byStd = {};
+  cmp.rules.forEach(function(r){ if (!byStd[r.standard]){ byStd[r.standard] = []; groups.push(r.standard); } byStd[r.standard].push(r); });
+  groups.forEach(function(std){
+    var items = byStd[std], passN = items.filter(function(r){ return r.verdict === 'pass'; }).length;
+    var descs = []; items.forEach(function(r){ if (r.description && descs.indexOf(r.description) < 0) descs.push(r.description); });
+    B.push(tblBlock(null, [[{ v:std, tone:'head' }, { v:passN + ' / ' + items.length + ' pass', tone:(passN === items.length ? 'ok' : items.some(function(r){ return r.verdict === 'fail'; }) ? 'bad' : 'watch') }]], { colw:['70%','30%'] }));
+    if (descs.length) B.push(blk(bP(descs.join(' '), { size:9, italic:true })));
+    B.push(tblBlock(['Clause', 'Measured', 'Limit', 'Verdict', 'Remark'], items.map(function(r){
+      var d = r.unit === '' ? 3 : 2;
+      return [r.clause, fix(r.measured, d) + (r.unit ? ' ' + r.unit : ''), fix(r.limit, r.unit === '' ? 2 : 0) + (r.unit ? ' ' + r.unit : ''),
+        { v:PQ_VERDICT[r.verdict] || r.verdict, tone:PQ_TONE[r.verdict] || null }, r.remark || ''];
+    }), { size:8, colw:['22%','14%','12%','11%','41%'] }));
   });
-  B.push(tblBlock(['Standard', 'Clause', 'Measured', 'Limit', 'Verdict', 'Remark'], rows, { size:8, colw:['13%','19%','12%','10%','10%','36%'] }));
-  B.push(blk(bP('Verdicts as evaluated by the AI power quality analyser over the whole recording (' + inr(rec.samples) + ' samples): IEEE 519 harmonic limits, EN 50160 supply voltage and frequency envelopes, IEC 61000-3-14 voltage imbalance and the utility power-factor threshold. A marginal result counts as half a pass in the score.', { size:9, italic:true })));
+  /* the picture: verdicts per standard */
+  B.push(blk(bChart(chartStacked(groups.map(function(g){ return g.replace(' (typical)', ''); }), [
+    { name:'Pass', color:C.ok, values:groups.map(function(g){ return byStd[g].filter(function(r){ return r.verdict === 'pass'; }).length; }) },
+    { name:'Marginal', color:C.watch, values:groups.map(function(g){ return byStd[g].filter(function(r){ return r.verdict === 'warn'; }).length; }) },
+    { name:'Fail', color:C.bad, values:groups.map(function(g){ return byStd[g].filter(function(r){ return r.verdict === 'fail'; }).length; }) }
+  ], 'Compliance verdicts by standard', 'checks'), 'Number of clauses passing, marginal and failing under each standard.')));
 }
 
-/* Equipment health: five components and the weighted score. */
+/* Equipment health, as in the analyser's audit PDF: the weighted score,
+   the five components with what was measured, their weight, score and
+   status, the score chart, and the recommended actions. */
 function pqHealthBlocks(B, rec){
   var h = rec.health; if (!h || !h.components) return;
+  var status = String(h.status || (h.overall >= 80 ? 'good' : h.overall >= 55 ? 'fair' : 'poor'));
   B.push(blk(bH(3, 'Equipment health \u2014 ' + (rec.recId || rec.name))));
-  B.push(blk(bKPI([['Overall health', h.overall + ' / 100']].concat(h.components.map(function(c){ return [c.label, c.score + ' (' + (c.status || '') + ')']; })))));
-  B.push(tblBlock(['Component', 'Score', 'Status', 'Finding', 'Recommendation'],
-    h.components.map(function(c){ return [c.label, String(c.score), { v:String(c.status || '').replace(/^./, function(x){ return x.toUpperCase(); }), tone:PQ_TONE[c.status] || null }, c.detail, c.recommendation]; }),
-    { size:8, colw:['18%','8%','9%','32%','33%'] }));
+  B.push(blk(bP('Weighted composite of harmonics, voltage stability, power factor, three-phase balance and frequency, scored 0\u2013100 by the analyser (good \u2265 80, fair \u2265 55, poor below).', { size:9.5 })));
+  B.push(blk(bKPI([['Overall health', h.overall + ' / 100 \u2014 ' + status.replace(/^./, function(x){ return x.toUpperCase(); })]].concat(h.components.map(function(c){ return [c.label, c.score + ' (' + (c.status || '') + ')']; })))));
+  B.push(tblBlock(['Component', 'Measured', 'Weight', 'Score', 'Status', 'Finding'],
+    h.components.map(function(c){ return [c.label, fix(c.raw, 3), Math.round((c.weight || 0) * 100) + ' %', String(c.score),
+      { v:String(c.status || '').replace(/^./, function(x){ return x.toUpperCase(); }), tone:PQ_TONE[c.status] || null }, c.detail || '']; }),
+    { size:8, colw:['17%','10%','8%','7%','9%','49%'] }));
   B.push(blk(bChart(chartBarsRef(h.components.map(function(c){ return c.label.replace(/ (Health|Stability|Balance)$/, ''); }), h.components.map(function(c){ return c.score; }),
-    'Equipment health scores', 'score / 100', { ref:{ value:80, label:'Good \u2265 80' }, color:PH[0] }))));
+    'Equipment health scores', 'score / 100', { ref:{ value:80, label:'Good \u2265 80' }, colorAt:function(v){ return v >= 80 ? C.ok : v >= 55 ? C.watch : C.bad; } }))));
+  B.push(tblBlock(['Recommended action', 'For'], h.components.map(function(c){ return [c.recommendation || '\u2014', c.label]; }), { size:8.5, colw:['76%','24%'] }));
+}
+
+/* Cost of poor power quality \u2014 the analyser's Cost page arithmetic, run
+   here on the rates in force for this report. The analyser's tariff
+   figures arrive with the recording; PostMan's own rates (bill analysis,
+   cost register) can replace them on the Electrical distribution page,
+   and the printed section says which were used. */
+function pqCostCalc(rec, i){
+  var s = rec.stats || {};
+  var avgKw = s.kw ? s.kw.avg : 0, avgKva = s.kva ? s.kva.avg : 0, avgPf = s.pf ? s.pf.avg : 1, vthd = s.vthd ? s.vthd.avg : 0;
+  var annualHours = tn(i.hoursPerDay) * tn(i.daysPerYear), annualKwh = avgKw * annualHours;
+  var energyCost = annualKwh * tn(i.tariff), demandCost = avgKva * tn(i.demandCharge) * 12;
+  var pfDeficit = Math.max(0, tn(i.pfThreshold) - avgPf), pfPenaltyPctTotal = Math.round(pfDeficit * 100) * tn(i.pfPenaltyPct);
+  var pfPenalty = (energyCost + demandCost) * (pfPenaltyPctTotal / 100);
+  var harmonicLossPct = vthd * 0.5, harmonicLoss = energyCost * (harmonicLossPct / 100);
+  var targetPf = Math.max(0.95, tn(i.pfThreshold)), newKva = avgPf > 0 ? avgKw / targetPf : avgKva;
+  var kvaSavings = Math.max(0, (avgKva - newKva) * tn(i.demandCharge) * 12);
+  var totalLeak = pfPenalty + harmonicLoss;
+  return { annualHours:annualHours, annualKwh:annualKwh, energyCost:energyCost, demandCost:demandCost, avgKw:avgKw, avgKva:avgKva, avgPf:avgPf, vthd:vthd,
+           pfDeficit:pfDeficit, pfPenaltyPctTotal:pfPenaltyPctTotal, pfPenalty:pfPenalty, harmonicLossPct:harmonicLossPct, harmonicLoss:harmonicLoss,
+           targetPf:targetPf, newKva:newKva, kvaSavings:kvaSavings, totalLeak:totalLeak, totalPotential:totalLeak + kvaSavings };
+}
+/* The rates this report already knows: the bills' blended rate and the
+   DISCOM demand slab, the cost register's unit rate and working days. */
+function pqReportRates(){
+  var out = {};
+  try { var c = billCalc(); if (c && c.avg && c.avg.rate) out.tariff = +Number(c.avg.rate).toFixed(2); } catch (e){}
+  if (!out.tariff && num(S.costs.unitRate) !== null) out.tariff = num(S.costs.unitRate);
+  try { var cfg = billCfg(); if (cfg && cfg.slab1Rate) out.demandCharge = cfg.slab1Rate; } catch (e){}
+  if (num(S.costs.days) !== null) out.daysPerYear = num(S.costs.days);
+  return out;
+}
+function pqCostInputs(rec){
+  var base = (rec.cost && rec.cost.inputs) || { tariff:9.5, demandCharge:350, pfThreshold:0.95, pfPenaltyPct:1, hoursPerDay:16, daysPerYear:300, currency:'\u20B9' };
+  if (!rec.costInputs) rec.costInputs = { tariff:base.tariff, demandCharge:base.demandCharge, pfThreshold:base.pfThreshold, pfPenaltyPct:base.pfPenaltyPct, hoursPerDay:base.hoursPerDay, daysPerYear:base.daysPerYear, currency:base.currency || '\u20B9', source:'analyser' };
+  return rec.costInputs;
+}
+function pqCostBlocks(B, rec){
+  if (!rec.cost && !(rec.stats && rec.stats.kw)) return;
+  var i = pqCostInputs(rec), r = pqCostCalc(rec, i), cur = i.currency || '\u20B9';
+  var money = function(v){ return (v === null || v === undefined || !isFinite(v)) ? '\u2014' : cur + ' ' + inr(Math.round(v)); };
+  B.push(blk(bH(3, 'Cost of poor power quality \u2014 ' + (rec.recId || rec.name))));
+  B.push(blk(bP('The recording\u2019s averages translated into annual rupees: the utility\u2019s low power-factor penalty, the extra losses that harmonics cause in transformers and cables, and the billed kVA that power-factor correction would remove. Rule-of-thumb figures for scale; the bill analysis chapter carries the tariff-exact working.', { size:9.5 })));
+  B.push(blk(bKPI([
+    ['Annual leakage', money(r.totalLeak)], ['PF penalty', money(r.pfPenalty)], ['Harmonic losses', money(r.harmonicLoss)], ['kVA saving if PF corrected', money(r.kvaSavings)], ['Total recoverable', money(r.totalPotential)]
+  ])));
+  B.push(tblBlock(['Item', 'Basis', 'Per year'], [
+    ['Energy cost', tfix(r.avgKw, 1) + ' kW avg \u00D7 ' + inr(r.annualHours) + ' h = ' + inr(Math.round(r.annualKwh)) + ' kWh \u00D7 ' + cur + ' ' + i.tariff + '/kWh', money(r.energyCost)],
+    ['Demand cost', tfix(r.avgKva, 1) + ' kVA \u00D7 ' + cur + ' ' + i.demandCharge + '/kVA/month \u00D7 12', money(r.demandCost)],
+    ['Low power factor penalty', 'PF ' + tfix(r.avgPf, 3) + (r.pfDeficit > 0 ? ' is ' + tfix(r.pfDeficit, 2) + ' below ' + i.pfThreshold + ': ' + tfix(r.pfPenaltyPctTotal, 1) + ' % of the bill' : ' meets the ' + i.pfThreshold + ' threshold'), { v:money(r.pfPenalty), tone:(r.pfPenalty > 0 ? 'bad' : 'ok') }],
+    ['Harmonic losses', 'V-THD ' + tfix(r.vthd, 2) + ' % \u2248 ' + tfix(r.harmonicLossPct, 2) + ' % of energy cost (0.5 % per 1 % THD)', { v:money(r.harmonicLoss), tone:(r.harmonicLoss > 0 ? 'watch' : null) }],
+    ['kVA reduction if PF raised to ' + tfix(r.targetPf, 2), tfix(r.avgKva, 0) + ' \u2192 ' + tfix(r.newKva, 0) + ' kVA billed', { v:money(r.kvaSavings), tone:'ok' }],
+    [{v:'Total recoverable per year',tone:'head'}, {v:'penalty + harmonic losses + demand saving',tone:'head'}, {v:money(r.totalPotential),tone:'head'}]
+  ], { colw:['26%','50%','24%'] }));
+  B.push(blk(bChart(chartBarsRef(['PF penalty', 'Harmonic', 'kVA saving', 'Total'], [r.pfPenalty, r.harmonicLoss, r.kvaSavings, r.totalPotential], 'Cost of poor power quality', cur + ' per year',
+    { colorAt:function(v, k){ return k === 3 ? C.navy : k === 2 ? C.ok : C.bad; } }), 'Annual penalty and losses now, the demand saving available, and the total recoverable.')));
+  B.push(blk(bP('Tariff figures ' + (i.source === 'postman' ? 'as set in PostMan from this report\u2019s bill analysis and cost register' : 'as entered on the analyser\u2019s Cost page') + ': ' + cur + ' ' + i.tariff + '/kWh, ' + cur + ' ' + i.demandCharge + '/kVA/month, ' + i.hoursPerDay + ' h/day, ' + i.daysPerYear + ' days/year, penalty ' + i.pfPenaltyPct + ' % per 0.01 below PF ' + i.pfThreshold + '.', { size:9, italic:true })));
+}
+
+/* The tariff card for a recording on the Electrical distribution page. */
+function pqCostCard(rec){
+  var i = pqCostInputs(rec);
+  var box = el('div','border-top:1px dashed var(--line);margin-top:8px;padding-top:8px;');
+  var head = el('div','display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;');
+  head.appendChild(el('strong','font-size:12px;', 'Cost of poor quality \u2014 tariff figures'));
+  head.appendChild(el('span','font-size:11px;color:var(--ink-3);', i.source === 'postman' ? 'set in PostMan' : 'as entered on the analyser'));
+  var use = btn('Use this report\u2019s rates', function(){
+    var rr = pqReportRates(), n = 0;
+    Object.keys(rr).forEach(function(k){ if (rr[k] !== undefined && rr[k] !== null){ i[k] = rr[k]; n++; } });
+    if (!n){ alert('No rates yet: read the bills (blended \u20B9/kWh and the demand slab) or set the unit rate and working days in the Cost register first.'); return; }
+    i.source = 'postman'; save(); renderAll();
+  }, 'sm'); use.style.marginLeft = 'auto'; head.appendChild(use);
+  if (rec.cost && rec.cost.inputs) head.appendChild(btn('Back to analyser\u2019s', function(){ rec.costInputs = null; save(); renderAll(); }, 'sm'));
+  box.appendChild(head);
+  var mark = function(f){ var inp = f.querySelector('input'); if (inp) inp.addEventListener('input', function(){ i.source = 'postman'; }); return f; };
+  box.appendChild(gridOf([
+    mark(fNum(i,'tariff','Tariff \u20B9/kWh')), mark(fNum(i,'demandCharge','Demand charge \u20B9/kVA/month')), mark(fNum(i,'pfThreshold','PF threshold')),
+    mark(fNum(i,'pfPenaltyPct','Penalty % per 0.01 PF')), mark(fNum(i,'hoursPerDay','Hours per day')), mark(fNum(i,'daysPerYear','Days per year'))
+  ]));
+  var r = pqCostCalc(rec, i);
+  box.appendChild(el('div','font-size:12px;color:var(--ink-2);margin-top:6px;font-family:"IBM Plex Mono",monospace;',
+    'leakage \u20B9 ' + inr(Math.round(r.totalLeak)) + ' /yr \u00B7 recoverable \u20B9 ' + inr(Math.round(r.totalPotential)) + ' /yr'));
+  return box;
 }
 
 /* Detected events: counts and the worst few. */
@@ -7662,27 +7770,6 @@ function pqQualityBlocks(B, rec){
   if (rec.observations && rec.observations.length) B.push(blk(bNote('Analyser observations: ' + rec.observations.join(' '))));
 }
 
-/* Cost of poor power quality, worked on the analyser's Cost page with the
-   tariff figures the engineer typed there. */
-function pqCostBlocks(B, rec){
-  var c = rec.cost; if (!c || !c.result) return;
-  var r = c.result, i = c.inputs || {}, cur = i.currency || '\u20b9';
-  var money = function(v){ return (v === null || v === undefined || !isFinite(v)) ? '\u2014' : cur + ' ' + inr(Math.round(v)); };
-  B.push(blk(bH(3, 'Cost of poor power quality \u2014 ' + (rec.recId || rec.name))));
-  B.push(blk(bKPI([
-    ['Annual leakage', money(r.totalLeak)], ['PF penalty', money(r.pfPenalty)], ['Harmonic losses', money(r.harmonicLoss)], ['Saving if PF corrected', money(r.totalPotential)]
-  ])));
-  B.push(tblBlock(['Item', 'Basis', 'Per year'], [
-    ['Energy cost', tfix(r.avgKw, 1) + ' kW avg \u00d7 ' + inr(r.annualHours) + ' h = ' + inr(Math.round(r.annualKwh)) + ' kWh \u00d7 ' + cur + ' ' + i.tariff + '/kWh', money(r.energyCost)],
-    ['Demand cost', tfix(r.avgKva, 1) + ' kVA \u00d7 ' + cur + ' ' + i.demandCharge + '/kVA/month \u00d7 12', money(r.demandCost)],
-    ['Low power factor penalty', 'PF ' + tfix(r.avgPf, 3) + (r.pfDeficit > 0 ? ' is ' + tfix(r.pfDeficit, 2) + ' below ' + i.pfThreshold + ': ' + tfix(r.pfPenaltyPctTotal, 1) + ' % of the bill' : ' meets the ' + i.pfThreshold + ' threshold'), { v:money(r.pfPenalty), tone:(r.pfPenalty > 0 ? 'bad' : 'ok') }],
-    ['Harmonic losses', 'V-THD ' + tfix(r.vthd, 2) + ' % \u2248 ' + tfix(r.harmonicLossPct, 2) + ' % of energy cost (0.5 % per 1 % THD)', { v:money(r.harmonicLoss), tone:(r.harmonicLoss > 0 ? 'watch' : null) }],
-    ['kVA reduction if PF raised to ' + tfix(r.targetPf, 2), tfix(r.avgKva, 0) + ' \u2192 ' + tfix(r.newKva, 0) + ' kVA billed', { v:money(r.kvaSavings), tone:'ok' }],
-    [{v:'Total recoverable per year',tone:'head'}, {v:'penalty + harmonic losses + demand saving',tone:'head'}, {v:money(r.totalPotential),tone:'head'}]
-  ], { colw:['26%','50%','24%'] }));
-  B.push(blk(bP('Tariff figures as entered on the analyser: ' + cur + ' ' + i.tariff + '/kWh, ' + cur + ' ' + i.demandCharge + '/kVA/month, ' + i.hoursPerDay + ' h/day, ' + i.daysPerYear + ' days/year, penalty ' + i.pfPenaltyPct + ' % per 0.01 below PF ' + i.pfThreshold + '. Rule-of-thumb figures for scale; the bill analysis chapter carries the tariff-exact working.', { size:9, italic:true })));
-}
-
 /* The analyser's charts, as captured on its dashboard, in place of a
    redrawing. `which` is a regex over the chart titles. */
 function pqChartBlocks(B, rec, which){
@@ -7698,7 +7785,11 @@ recSummaryBlocks = function(B, rec){
        PF and THD charts rather than PostMan's redrawing of the series. */
     var keep = recCharts; recCharts = function(){ return []; };
     try { _recSummaryBlocksPlain(B, rec); } finally { recCharts = keep; }
-    pqChartBlocks(B, rec, /Power Factor|THD/i);
+    /* Every chart the analyser captured for this panel, here under it;
+       the findings follow the graphs. */
+    B.push(blk(bH(3, 'Measurement charts \u2014 ' + (rec.recId || rec.name))));
+    pqChartBlocks(B, rec, /./);
+    if (rec.sentAt) B.push(blk(bP('Charts as captured on the AI-PQA dashboard when the recording was sent to PostMan on ' + rec.sentAt + '.', { size:9, italic:true })));
   } else _recSummaryBlocksPlain(B, rec);
   if (!rec.bundle) return;
   if (rec.stats && (rec.stats.vImb !== undefined || rec.stats.iImb !== undefined))
@@ -7714,11 +7805,11 @@ recSummaryBlocks = function(B, rec){
    PostMan's own drawings only for a recording that arrived as a workbook. */
 var _recChartsPlain = recCharts;
 function pqAnnexCharts(B, rec){
-  if (rec.charts && rec.charts.length){
-    rec.charts.forEach(function(c){ B.push(blk(bImg(c, c.title + ' (AI-PQA)', 210))); });
-    if (rec.sentAt) B.push(blk(bP('Charts as captured on the AI-PQA dashboard when the recording was sent to PostMan on ' + rec.sentAt + '.', { size:9, italic:true })));
-  } else _recChartsPlain(rec, 'vipfuch').forEach(function(c){ B.push(blk(bChart(c[1]))); });
+  _recChartsPlain(rec, 'vipfuch').forEach(function(c){ B.push(blk(bChart(c[1]))); });
 }
+/* A recording sent from the analyser prints its charts under its panel, so
+   the annexure lists only recordings that arrived as a workbook. */
+function pqInAnnexure(rec){ return !(rec.charts && rec.charts.length); }
 
 /* The PCC summary and the executive overview get a compliance column. */
 function pqScoreOf(panel){
