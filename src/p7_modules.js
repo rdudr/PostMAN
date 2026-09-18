@@ -73,6 +73,7 @@ function specCard(rows, title, addLabel){
 }
 
 FORMS.boiler = function(w){
+  txCard(w, 'boiler');
   w.appendChild(specCard(S.boiler.spec, 'Technical specification of boiler'));
   w.appendChild(directMethodCard(S.boiler.direct));
   w.appendChild(fuelBurnerCard(S.boiler.indirect, 'Indirect method — flue gas analysis'));
@@ -80,6 +81,7 @@ FORMS.boiler = function(w){
   w.appendChild(c);
 };
 FORMS.tfh = function(w){
+  txCard(w, 'tfh');
   w.appendChild(specCard(S.tfh.spec, 'Technical details — thermic oil heater'));
   w.appendChild(directMethodCard(S.tfh.direct));
   w.appendChild(fuelBurnerCard(S.tfh.indirect, 'Thermopack indirect method'));
@@ -99,6 +101,10 @@ function toCFM(v, unit){
   }
 }
 FORMS.compressor = function(w){
+  var ci = card('From A-CMP', 'Drop the A-CMP export here — one or several files. Compressors merge by machine tag, so a re-import never duplicates.');
+  ci.appendChild(importDrop({ compact:true, label:'Drop A-CMP workbooks here, or click to choose', hint:'Any workbook is accepted; only what it holds is read.' }));
+  ci.appendChild(importLogBox());
+  w.appendChild(ci);
   var c = card('Air compressors',
     'Design SEC and air generation come from the nameplate; actual comes from the FAD or pump-up test. The gap between them is the recommendation.');
   c.appendChild(btn('+ Add compressor', function(){
@@ -280,31 +286,8 @@ FORMS.jets = function(w){
   optImport.appendChild(el('div','font-size:13px;font-weight:bold;color:#67e8f9;margin-bottom:4px;','Option 1: Import JET EFF Excel File'));
   optImport.appendChild(el('div','font-size:11px;color:#94a3b8;margin-bottom:10px;','Upload a .xlsx workbook exported from JET EFF containing company profile & Jet Data sheets.'));
 
-  var fileLabel = document.createElement('label');
-  fileLabel.style.cssText = 'cursor:pointer;display:inline-block;';
-  var fileInput = document.createElement('input');
-  fileInput.type = 'file'; fileInput.accept = '.xlsx,.xls,.csv'; fileInput.style.display = 'none';
-  fileInput.onchange = function(e){
-    var file = e.target.files && e.target.files[0];
-    if (file){
-      var r = new FileReader();
-      r.onload = function(ev){
-        try {
-          var wb = XLSX.read(ev.target.result, { type:'array' });
-          var log = importJetEff(wb);
-          save(); renderAll();
-          alert('Excel imported successfully:\n\n' + log.join('\n'));
-        } catch(err) {
-          alert('Error importing Excel file: ' + err.message);
-        }
-      };
-      r.readAsArrayBuffer(file);
-    }
-  };
-  fileLabel.appendChild(fileInput);
-  var btnImp = el('span','display:inline-flex;align-items:center;justify-content:center;height:32px;padding:0 14px;background:#0891b2;border-radius:6px;color:#ffffff;font-size:12px;font-weight:bold;','📥 Choose & Import Excel File');
-  fileLabel.appendChild(btnImp);
-  optImport.appendChild(fileLabel);
+  optImport.appendChild(importDrop({ compact:true, label:'Drop JET-Eff workbooks here, or click to choose', hint:'One or several files; jets merge by Jet No.' }));
+  optImport.appendChild(importLogBox());
 
   // Option B: Add Manually
   var optManual = el('div');

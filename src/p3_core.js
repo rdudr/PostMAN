@@ -177,6 +177,7 @@ function blankState(){
     dist:{ demand:{ contract:null, avg:null, min:null, max:null, window:'' },
            pcc:[], motors:[], apfc:[], motorNote:'', apfcNote:'', mains:[], mcc:[], foxUpload:null },
     pq:blankPq(),
+    thermox:blankThermox(),
     tr:{ make:'', capacity:null, primaryV:null, secondaryV:null, impedance:null,
          noLoadLoss:null, loadLoss:null, oilQty:'', year:'', srNo:'',
          meterUnits:null, loading:null, stdEff:null, actualEff:null,
@@ -250,13 +251,18 @@ function deepMerge(base, over){
   return out;
 }
 var saveT = null;
+function saveNow(){
+  clearTimeout(saveT); saveT = null;
+  try { localStorage.setItem(KEY, JSON.stringify(S)); }
+  catch (e) { /* quota or blocked - the draft still lives in memory */ }
+}
 function save(){
   clearTimeout(saveT);
-  saveT = setTimeout(function(){
-    try { localStorage.setItem(KEY, JSON.stringify(S)); }
-    catch (e) { /* quota or blocked - the draft still lives in memory */ }
-  }, 250);
+  saveT = setTimeout(saveNow, 250);
 }
+/* A tab closed or reloaded inside the debounce window would lose the last
+   quarter-second of typing; flush it on the way out. */
+window.addEventListener('beforeunload', function(){ if (saveT) saveNow(); });
 
 /* ---- images. Alpha is preserved end to end; the stored asset is always
    PNG-32, never flattened, so one file works on the white cover and on a

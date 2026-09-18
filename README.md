@@ -82,6 +82,22 @@ beside the fields.
    up in `docs/POSTMAN_EXPORT.md` of the AI-PQA repository
    (https://github.com/rdudr/AI-PQA) and `docs/POSTMAN_IMPORT.md` of the FOX
    KISEM project.
+3c. **Boiler and thermic fluid heater from Thermo-X** — drop the Thermo-X
+   app's Excel exchange file (Report → Export Excel) on the Boiler page, the
+   Thermic fluid heater page or Import field data. The chapter then prints
+   from it with Thermo-X's own formulas: efficiency summary and chart, the
+   fuels' laboratory analyses, each boiler's name-plate, the direct method
+   (daily log, steam table, efficiency, evaporation ratio), the indirect
+   method (losses L1–L8 per sample and overall, loss chart, the KANE
+   analyser recording with the samples marked) and the observations. A
+   Thermo-X boiler typed *Thermic fluid heater* prints in the TFH chapter.
+   The typed cards below are used only when there is no Thermo-X data.
+
+   Every chapter that takes a workbook has its own drop box, which accepts
+   several files at once; every import merges by the record's own key, so
+   nothing is ever duplicated. How the apps and PostMan are kept in step —
+   and the rule that every touched repository is pushed — is written up in
+   [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
 4. **Modules** — switch on only the utilities the plant actually has.
 5. **Recommendations** — every chapter screen ends with "Add recommendation
    to this chapter". Each one carries a title, observation and recommendation;

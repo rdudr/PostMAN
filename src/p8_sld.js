@@ -464,7 +464,7 @@ function importJetEff(wb, skip){
       if (existingJ && existingJ.jetNo) existingByNo[String(existingJ.jetNo).trim()] = existingJ;
     });
 
-    S.jets = jets.map(parseJetRow).filter(function(j){ return j; })
+    var incomingJets = jets.map(parseJetRow).filter(function(j){ return j; })
                  .map(function(j){
                    var prev = existingByNo[String(j.jetNo).trim()];
                    if (prev && prev.images && Object.keys(prev.images).length){
@@ -472,6 +472,11 @@ function importJetEff(wb, skip){
                    }
                    return recalcJet(j, S.jetCost);
                  });
+    /* Merge by Jet No: a jet in the file replaces its earlier copy, jets
+       not in the file stay, so two partial exports build one list. */
+    var inFile = {};
+    incomingJets.forEach(function(j){ inFile[String(j.jetNo).trim()] = 1; });
+    S.jets = (S.jets || []).filter(function(j){ return j && !inFile[String(j.jetNo).trim()]; }).concat(incomingJets);
     S.enabled.jets = true;
     log.push(S.jets.length + ' jets (all ' + JET_FIELDS.length + ' columns)');
     var passing = S.jets.filter(function(j){ return j.trapStatus === 'Trap Passing'; }).length;
@@ -740,7 +745,7 @@ function importACmp(wb){
   var rows = sheetRows(wb, 'Compressors');
   if (!rows.length) rows = sheetRows(wb, 'Compressor Entries');
   if (!rows.length) return log;
-  S.compressor = rows.map(function(r){
+  var incoming = rows.map(function(r){
     return { tag: pick(r,['machineTag','Machine Tag']) || '',
       make: pick(r,['makeModel','Make / Model']) || '',
       type: pick(r,['compressorType','Type']) || 'Screw',
@@ -761,35 +766,76 @@ function importACmp(wb){
       loadHrs:null, unloadHrs:null, totalHrs:null, hoursPerDay:24,
       obs: pick(r,['description','fadDescription']) || '' };
   });
+  /* A compressor already in the report (same tag) is replaced, the rest
+     kept, so re-importing or a second partial file never duplicates. */
+  var keep = (S.compressor || []).filter(function(k){ return !incoming.some(function(n){ return n.tag && normKey(n.tag) === normKey(k.tag); }); });
+  S.compressor = keep.concat(incoming);
   S.enabled.compressor = true;
-  log.push(S.compressor.length + ' compressors');
+  log.push(incoming.length + ' compressor' + (incoming.length === 1 ? '' : 's'));
   return log;
 }
 
+/* The one import control, used on the Import field data screen AND on every
+   chapter that can take a workbook (boiler, heater, electrical distribution,
+   jets, compressors). It takes any number of files in one go - a FOX
+   export, three PQ recordings and a Thermo-X file together - reads them
+   one after another through importAny, and reports what each one brought
+   in, inline, so nobody is sent off to another screen to upload. */
+function importDrop(opts){
+  opts = opts || {};
+  var wrap = el('div');
+  var zone = el('div','border:1.5px dashed var(--line);border-radius:8px;padding:' + (opts.compact ? '10px 12px' : '16px') +
+    ';background:var(--panel-2);cursor:pointer;text-align:center;transition:border-color .15s;');
+  var i = el('input'); i.type = 'file'; i.accept = '.xlsx,.xls,.csv'; i.multiple = true; i.style.display = 'none';
+  zone.appendChild(el('div','font-weight:600;font-size:13px;', opts.label || 'Drop workbooks here, or click to choose'));
+  zone.appendChild(el('div','font-size:11.5px;color:var(--ink-3);margin-top:3px;', opts.hint ||
+    'Any number at once: JET-Eff, A-CMP, the FOX KISEM export, the Thermo-X exchange file, PQ analyser \u201cPostMan exports\u201d or a module workbook. Each file is identified from its own contents and checked against this report\u2019s company.'));
+  zone.appendChild(i);
+  var out = el('div','margin-top:8px;font-size:12px;'); out.hidden = true;
+  wrap.appendChild(zone); wrap.appendChild(out);
+
+  var run = function(files){
+    files = Array.prototype.slice.call(files || []).filter(function(f){ return /\.(xlsx|xls|csv)$/i.test(f.name); });
+    if (!files.length) return;
+    var lines = [], k = 0;
+    var next = function(){
+      if (k >= files.length){
+        save(); renderAll();
+        /* The form was just rebuilt; find our own result box in the new one. */
+        var box = document.getElementById('importlog');
+        if (box){
+          clear(box); box.hidden = false;
+          lines.forEach(function(l){ var p = el('div','padding:3px 0;', l[1]); p.className = l[0] === 'bad' ? 'callout bad' : 'callout good'; p.style.margin = '0 0 4px'; box.appendChild(p); });
+        } else alert(lines.map(function(l){ return l[1]; }).join('\n'));
+        return;
+      }
+      var f = files[k++];
+      readWorkbook(f).then(function(wb){
+        try {
+          var log = importAny(wb, f.name);
+          lines.push(log.length ? ['ok', f.name + ': ' + log.join('; ')] : ['bad', f.name + ': nothing recognised (sheets: ' + Object.keys(wb.Sheets).join(', ') + ')']);
+        } catch (err){ lines.push(['bad', f.name + ': ' + err.message]); }
+        next();
+      }).catch(function(e){ lines.push(['bad', f.name + ': ' + e.message]); next(); });
+    };
+    next();
+  };
+  zone.addEventListener('click', function(){ i.click(); });
+  i.addEventListener('change', function(){ run(i.files); i.value = ''; });
+  zone.addEventListener('dragover', function(e){ e.preventDefault(); zone.style.borderColor = 'var(--brand)'; });
+  zone.addEventListener('dragleave', function(){ zone.style.borderColor = 'var(--line)'; });
+  zone.addEventListener('drop', function(e){ e.preventDefault(); zone.style.borderColor = 'var(--line)'; run(e.dataTransfer.files); });
+  return wrap;
+}
+/* Where the last import's results are shown after the form rebuilds. */
+function importLogBox(){ var b = el('div'); b.id = 'importlog'; b.hidden = true; return b; }
+
 FORMS.imports = function(w){
   var c = card('Import field data',
-    'One door for every workbook. The file is identified from its own contents, checked against this report\u2019s company, then read into whichever modules it holds. Nothing is uploaded anywhere \u2014 it is read in this browser.');
-  var mk = function(label, fn, hint){
-    var i = el('input'); i.type='file'; i.accept='.xlsx,.xls,.csv';
-    i.addEventListener('change', function(){
-      var f = i.files && i.files[0]; if (!f) return;
-      readWorkbook(f).then(function(wb){
-        var log;
-        try { log = fn(wb, f.name); }
-        catch (err){ i.value = ''; alert(err.message); return; }
-        i.value = '';
-        save(); renderAll();
-        alert(log.length ? ('Imported:\n\n\u2022 ' + log.join('\n\u2022 ')) :
-          'Nothing recognised in that workbook. Sheets found: ' +
-          Object.keys(wb.Sheets).join(', '));
-      }).catch(function(e){ alert(e.message); });
-    });
-    return labelled(label, i, hint);
-  };
-  c.appendChild(mk('Drop any workbook here', importAny,
-    'JET-Eff, A-CMP, the FOX KISEM export, a PQ analyser \u201cPostMan export\u201d, or a module workbook \u2014 the file is identified from its own sheet names, ' +
-    'and if those were renamed, from its column headers. Only the modules it actually contains are touched.'));
-  var note = el('p','','A workbook whose company name differs from this report is flagged, never silently overwritten. Re-importing a module replaces it rather than duplicating rows.');
+    'One door for every workbook. Each file is identified from its own contents, checked against this report\u2019s company, then read into whichever modules it holds. Nothing is uploaded anywhere \u2014 it is read in this browser. The same drop box sits on every chapter that takes a workbook.');
+  c.appendChild(importDrop());
+  c.appendChild(importLogBox());
+  var note = el('p','','A workbook whose company name differs from this report is flagged, never silently overwritten. Every import merges by the record\u2019s own key \u2014 jet number, panel name, machine tag, recording ID, Thermo-X record id \u2014 so the same file twice, or two engineers\u2019 partial files, never duplicate a row.');
   note.className = 'callout info';
   c.appendChild(note);
   w.appendChild(c);
@@ -1213,6 +1259,13 @@ function importAny(wb, fileName){
   /* The two measured-data workbooks are recognised before anything else,
      because their sheets are unmistakable and neither carries the module
      template's headers. */
+  if (isThermoxWorkbook(wb)){
+    var theirsT = workbookCompany(wb), oursT = S.company.name;
+    if (theirsT && oursT && !sameCompany(theirsT, oursT) &&
+        !confirm('DIFFERENT COMPANY\n\nThis Thermo-X file is for:\n    ' + theirsT + '\n\nThis report is for:\n    ' + oursT + '\n\nPress Cancel to stop.'))
+      throw new Error('Import cancelled. That file belongs to ' + theirsT + ', not to this report.');
+    return importThermox(wb, fileName);
+  }
   if (isFoxWorkbook(wb)){
     var theirsF = workbookCompany(wb), oursF = S.company.name;
     if (theirsF && oursF && !sameCompany(theirsF, oursF) &&

@@ -95,8 +95,16 @@ function buildUtilities(B){
   if (!any) return;
   B.push(blk(bH(1,'Performance assessment of major plant utilities')));
 
-  if (S.enabled.boiler) buildFired(B, S.boiler, 'Performance assessment of boiler', 'boiler');
-  if (S.enabled.tfh) buildFired(B, S.tfh, 'Performance assessment of thermic oil heater', 'tfh');
+  /* Thermo-X data, when it has been imported, writes these two chapters
+     with the app's own formulas; the typed cards are the fallback. */
+  if (S.enabled.boiler){
+    if (txBoilersOf('boiler').length) buildThermoxFired(B, 'boiler', 'Performance assessment of boiler', 'boiler', S.boiler);
+    else buildFired(B, S.boiler, 'Performance assessment of boiler', 'boiler');
+  }
+  if (S.enabled.tfh){
+    if (txBoilersOf('tfh').length) buildThermoxFired(B, 'tfh', 'Performance assessment of thermic oil heater', 'tfh', S.tfh);
+    else buildFired(B, S.tfh, 'Performance assessment of thermic oil heater', 'tfh');
+  }
 
   if (S.enabled.compressor && (S.compressor.length || hasRecos('compressor'))){
     B.push(blk(bH(2,'Performance assessment of air compressor')));

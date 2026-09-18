@@ -1,0 +1,103 @@
+# PostMan and the field apps — one contract, kept in step
+
+PostMan prints the KISEM energy-assessment report. It does not measure
+anything itself: the figures come from the field apps, each through an
+Excel export, and PostMan reads those exports without anyone retyping.
+That only works while both sides agree on what the file holds and how the
+numbers are worked. This page is that agreement, and the rules for
+changing it.
+
+## The two rules
+
+1. **A change on one side is a change on both.** If a field, a sheet, a
+   unit, a label or a formula changes in an app's export — or PostMan
+   starts needing something new (say, the Indian-standard rating class of a
+   machine from FOX KISEM) — the app's export *and* PostMan's importer *and*
+   the table below are changed together, in the same sitting. The same goes
+   for cosmetic things: if a name, unit or verdict wording is improved in
+   the report, carry it back to the app so its screen and its own PDF say
+   the same thing.
+2. **Every project touched is pushed to GitHub before the work is called
+   done.** The repositories are the shared copies; the network share and
+   any laptop are working copies. `git add -A && git commit && git push`
+   in every repository you changed, and say in the commit message which
+   other repository the change pairs with.
+
+## The apps and what PostMan takes from each
+
+| App | Repository | Export (code) | What PostMan reads it into | PostMan code | Contract doc |
+|---|---|---|---|---|---|
+| **FOX KISEM** — plant electrical survey (Android / web) | `rdudr/fox-kisem` (working copy `\\10.0.117.251\iea\FOX IITGN All\Raw\fox-kisen`) | `lib/export-offline.ts` and the server export; sheets *Company Profile, Plant Main Inputs, PCC Panels, MCC Panels, Motor Loads Clamp, Motor Loads PQ, APFC*; `Reported By:` line above each header | *Assessment of electrical distribution system*: main inputs, PCC panels and load summary, MCC panels, motor load study (clamp / PQ, load-factor verdict), APFC stage currents and remarks; the "Last uploaded data on … from …" stamp; panel names for the single line diagram | `src/p19_pq.js` — `FOX_SHEETS`, `foxRows`, `foxReporter`, `foxPanel`, `importFox`, `uploadStamp`, `buildDistSection` | `docs/POSTMAN_IMPORT.md` in FOX |
+| **AI-PQA** — AI power quality analyser (FastAPI + React) | `rdudr/AI-PQA` | *Export for PostMan* on the dashboard → `backend/reports/postman_export.py`, routes in `backend/routes/upload.py`; workbook `PostMan-PQ v1`: sheets *PostMan* (Field \| Value), *Summary*, *Harmonics*, *Data* | *Power quality analysis* under each main input / PCC / MCC panel (V, I, PF, THD against IEEE-519, harmonic spectrum) and the measurement charts in **Annexure A**; joined to the FOX panel by **Recording ID** | `src/p19_pq.js` — `PQ_COLS`, `pqMeta`, `importPq`, `pqLinkToPanels`, `recSummaryBlocks`, `recCharts`, `buildPqAnnexure` | `docs/POSTMAN_EXPORT.md` in AI-PQA |
+| **Thermo-X** — boiler / thermic fluid heater performance (Next.js, Android) | `rdudr/-thermo-X` (working copy `C:\Users\risha\Desktop\thermo-X`) | Report → *Export Excel* → `lib/data-exchange.ts`; workbook `thermo-x-v1`: sheets *Meta, Company, Fuels, Boilers, DirectTests, DirectLog, IndirectTests, IndirectSamples, InstrumentLogs* | *Performance assessment of boiler* and *… of thermic oil heater*: efficiency summary and chart, fuel laboratory analyses, per boiler name-plate, direct method (daily log, steam table, efficiency, evaporation ratio), indirect method (per-sample losses L1–L8, overall, loss chart, KANE analyser recording with the samples marked), the auto observations; a boiler whose type is *Thermic fluid heater* prints in the TFH chapter | `src/p20_thermox.js` — `importThermox`, `txAnalyseFuel`, `txSteam`, `txDirect`, `txSample`, `txIndirect`, `buildThermoxFired`, `txCard` | this page (Thermo-X section below) |
+| **JET-Eff** — jet dyeing machine efficiency | (JET-Eff app) | its own workbook | *Jet machines* chapter | `src/p8_sld.js` — `importJetEff` | — |
+| **A-CMP** — air compressor assessment (Android) | `rdudr/A-CMP` | its own workbook | *Air compressor* chapter | `src/p8_sld.js` — `importACmp` | — |
+
+Every export is recognised by its own content (a `Meta`/`PostMan` sheet or
+its sheet names), never by file name, and is checked against the report's
+company before anything is written. The same drop box (`importDrop` in
+`src/p8_sld.js`) sits on **Import field data** and at the top of every
+chapter that takes a workbook — Boiler, Thermic fluid heater, Electrical
+distribution, Jet machines, Air compressor — and takes any number of files
+in one go. Every importer merges by the record's own key (jet number, panel
+name, machine tag + method, APFC panel + stage, recording ID, Thermo-X
+record id with newest `updatedAt` winning), so the same file twice, or two
+engineers' partial exports, never duplicate a row. A new importer must keep
+that rule.
+
+## Formulas that must stay identical
+
+| Figure | Owner | Mirror |
+|---|---|---|
+| Boiler direct efficiency, steam table (IAPWS-IF97 rows, +0.5 kcal/kg·°C superheat, feed water 1 kcal/kg·°C), evaporation ratio | Thermo-X `lib/boiler.ts`, `lib/steam-table.ts` (from `reference/Boiler-Performance-Analysis.xlsx`) | PostMan `txDirect`, `txSteam`, `TX_STEAM` |
+| Proximate → C, H, N relations; theoretical air; losses L1–L8; overall = average of samples | Thermo-X `analyseFuel`, `computeSample`, `computeIndirect` | PostMan `txAnalyseFuel`, `txSample`, `txIndirect` |
+| Motor load factor and the Working OK / Acceptable / Under-loaded / Overloaded bands; APFC stage status | FOX KISEM app screens | PostMan `buildDistSection` (motor load study, APFC) |
+| IEEE-519 THD limits (voltage 5 %, current 8 %), harmonic spectrum, min / avg / max | AI-PQA analytics | PostMan `IEEE`, `importPq`, `recSummaryBlocks` |
+| GERC tariff rules for the bill analysis (PF bands, demand slabs, 85 % billing demand, TOU, duty) | PostMan `src/p18_ebill.js` (from *EB Bill & Base Bills Biotech.xlsx*, sheet *Report Formet*) | — |
+
+If a formula is corrected in one place, correct it in the other in the
+same commit and re-run the figure check (a test export from the app, imported
+into PostMan, must give the same numbers to the last decimal — the
+`docs/POSTMAN_*` pages say how each app's check was done).
+
+## The checklist for a change
+
+Example: FOX KISEM gains a new column *IS rating class* for each motor, and
+the report should print it.
+
+1. **App**: add the column to the app's data model and to its export
+   (`lib/export-offline.ts` and the server export in FOX), keeping the
+   header text exactly as documented.
+2. **PostMan**: read it in the importer (`motorRow` in `src/p19_pq.js`),
+   print it where it belongs (the motor load table), rebuild with
+   `python src/build.py`, and confirm on a test export that the value
+   arrives and the page still lays out (no layout warning in the header
+   line).
+3. **Docs**: add the column to the sheet table in the app's contract doc
+   and, if the meaning of the file changed, bump its format tag
+   (`PostMan-PQ v2`, `thermo-x-v2`) so an old file is refused rather than
+   misread.
+4. **Push both repositories**, each commit naming the other.
+
+The same four steps apply the other way round — a wording, unit or verdict
+PostMan improves is carried into the app's screen and PDF.
+
+## Thermo-X exchange file — what PostMan reads
+
+Sheets and the columns used (all values are text in Thermo-X; blank = 0):
+
+| Sheet | Columns |
+|---|---|
+| `Meta` | `format` (= `thermo-x-v1`), `exportedAt`, `exportedBy` (printed in the "Last uploaded data on … from …" line) |
+| `Company` | `id, companyName, area, district, state, pincode` (company check) |
+| `Fuels` | `id, name, category (solid/liquid/gas), type, dateOfTesting, analysedBy, moisture, volatileMatter, ash, gcv, carbon, hydrogen, nitrogen, sulphur, oxygen, ashFixedCarbon, ashMoisture, ashVolatileMatter, ashGcv, ashQuantity, notes, updatedAt` |
+| `Boilers` | `id, name, make, model, serialNo, yearOfMake, boilerType, firingType, capacityTph, designPressure, designTemp, heatingSurface, ratedEfficiency, fuelIds (";"-separated), notes, updatedAt` |
+| `DirectTests` | `id, boilerId, fuelId, name, startDate, days, fuelUnitKg, fuelUnitLabel, steamPressure, steamTemp, feedWaterTemp, steamQtyOverride, fuelQtyOverride, hoursPerDay, updatedAt` |
+| `DirectLog` | `testId, date, fuelQty, waterKg` |
+| `IndirectTests` | `id, boilerId, fuelId, name, testDate, dataSource (manual/instrument), humidityFactor, cpFlueGas, cpSteam, radiationLoss, instAnalyser, instSerial, instUser, instFileName, instSavedAt, updatedAt` |
+| `IndirectSamples` | `testId, id, description, o2, co2, coPpm, flueTemp, ambientTemp, logNo, logTime` |
+| `InstrumentLogs` | `testId, logNo, time, co, co2, o2, t1, ta` |
+
+Records are merged by `id`, newest `updatedAt` wins — the same rule Thermo-X
+uses when a teammate's file is imported — so importing two exports never
+duplicates a test.

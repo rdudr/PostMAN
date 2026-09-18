@@ -264,11 +264,24 @@ function importFox(wb, fileName){
       remark:String(g('remark') || ''), desc:String(g('description') || ''), by:String(g('recordedby') || ''), date:String(g('date') || '') };
   }).filter(function(a){ return a.stage || a.panel; });
 
-  if (mains.length){ S.dist.mains = mains; log.push(mains.length + ' plant main input' + (mains.length === 1 ? '' : 's')); }
-  if (pcc.length){ S.dist.pcc = pcc; log.push(pcc.length + ' PCC panel' + (pcc.length === 1 ? '' : 's')); }
-  if (mcc.length){ S.dist.mcc = mcc; log.push(mcc.length + ' MCC panel' + (mcc.length === 1 ? '' : 's')); }
-  if (motors.length){ S.dist.motors = motors; log.push(motors.length + ' motor load reading' + (motors.length === 1 ? '' : 's')); }
-  if (apfc.length){ S.dist.apfc = apfc; log.push(apfc.length + ' APFC stage' + (apfc.length === 1 ? '' : 's')); }
+  /* Merge by the record's own key: a panel or motor already in the report
+     is replaced by the incoming copy, everything else is kept. The same
+     file twice, or two engineers' partial exports, never double a row. */
+  var mergeBy = function(list, incoming, keyOf){
+    var out = (list || []).slice();
+    incoming.forEach(function(n){
+      var k = keyOf(n), i = -1;
+      out.forEach(function(o, idx){ if (i < 0 && keyOf(o) === k) i = idx; });
+      if (i >= 0) out[i] = n; else out.push(n);
+    });
+    return out;
+  };
+  var count = function(n, what){ return n + ' ' + what + (n === 1 ? '' : 's'); };
+  if (mains.length){ S.dist.mains = mergeBy(S.dist.mains, mains, function(p){ return normKey(p.name); }); log.push(count(mains.length, 'plant main input')); }
+  if (pcc.length){ S.dist.pcc = mergeBy(S.dist.pcc, pcc, function(p){ return normKey(p.name); }); log.push(count(pcc.length, 'PCC panel')); }
+  if (mcc.length){ S.dist.mcc = mergeBy(S.dist.mcc, mcc, function(p){ return normKey(p.name); }); log.push(count(mcc.length, 'MCC panel')); }
+  if (motors.length){ S.dist.motors = mergeBy(S.dist.motors, motors, function(m){ return m.method + ':' + normKey(m.name); }); log.push(count(motors.length, 'motor load reading')); }
+  if (apfc.length){ S.dist.apfc = mergeBy(S.dist.apfc, apfc, function(a){ return normKey(a.panel) + ':' + normKey(a.stage); }); log.push(count(apfc.length, 'APFC stage')); }
 
   var by = foxReporter(wb) || S.meta.preparedBy || '';
   if (!by){ by = prompt('Who is uploading this FOX workbook? (printed in the report)', '') || ''; }
@@ -321,6 +334,14 @@ function chartLines(labels, series, title, unitY, opts){
       d += (started ? ' L' : ' M') + x.toFixed(1) + ' ' + ypos(v).toFixed(1); started = true;
     });
     if (d) svg.appendChild(sv('path', { d:d.trim(), fill:'none', stroke:s.color, 'stroke-width':1.3, 'stroke-linejoin':'round' }));
+  });
+  /* Marked points: the readings a test was worked from (Thermo-X samples). */
+  (opts.marks || []).forEach(function(m){
+    var s0 = series[0], v = s0 && s0.values ? s0.values[m.index] : null;
+    if (v === null || v === undefined || !isFinite(v)) return;
+    var x = pad.l + slot * m.index + slot / 2, y = ypos(v);
+    svg.appendChild(sv('circle', { cx:x, cy:y, r:2.6, fill:s0.color, stroke:'#fff', 'stroke-width':0.8 }));
+    svg.appendChild(svText(Math.min(x + 3, w - pad.r - 10), y - 4, m.label, { anchor:'start', size:6.4, weight:600, fill:s0.color }));
   });
   if (series.length > 1){
     var lx = pad.l;
@@ -551,7 +572,7 @@ FORMS.dist = function(w){
   pqState();
   var d = S.dist;
   var c = card('Measured data from FOX KISEM and the PQ analyser',
-    'Nothing on this screen is typed. Import the FOX KISEM workbook and each PQ analyser "PostMan export" on the Import field data screen; this page shows what arrived and lets you say which panel a recording belongs to.');
+    'Nothing on this screen is typed. Drop the FOX KISEM workbook and the PQ analyser "PostMan exports" below — all together if you like; this page shows what arrived and lets you say which panel a recording belongs to. Panels merge by name and recordings by recording ID, so a re-import never duplicates.');
   var k = el('div'); k.className = 'kpis';
   [['Main inputs', String(d.mains.length)], ['PCC panels', String(d.pcc.length)], ['MCC panels', String(d.mcc.length)],
    ['Motor readings', String(d.motors.length)], ['APFC stages', String(d.apfc.length)], ['PQ recordings', String(S.pq.recordings.length)]].forEach(function(p){
@@ -560,7 +581,10 @@ FORMS.dist = function(w){
   c.appendChild(k);
   if (d.foxUpload) c.appendChild(el('p','', uploadStamp())).className = 'callout good';
   else c.appendChild(el('p','', 'No FOX KISEM workbook imported yet.')).className = 'callout';
-  c.appendChild(btn('Go to Import field data', function(){ S.active = 'imports'; save(); renderAll(); }));
+  var drop = el('div','margin-top:10px;');
+  drop.appendChild(importDrop({ compact:true, label:'Drop the FOX KISEM export and PQ analyser exports here, or click to choose', hint:'Any number of files in one go.' }));
+  drop.appendChild(importLogBox());
+  c.appendChild(drop);
   w.appendChild(c);
 
   if (S.pq.recordings.length){
