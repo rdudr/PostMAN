@@ -11,7 +11,7 @@ def rd(name):
 
 parts_js = ['p3_core.js','p4_registry.js','p5_ui.js','p6_forms.js','p7_modules.js',
             'p8_sld.js','p9_charts.js','p10_report.js','p11_sections.js',
-            'p16_reco.js','p17_baseline.js','p17b_ghg.js','p18_ebill.js','p19_pq.js','p20_thermox.js','p14_custom.js','p15_bills.js','p12_pages.js','p13_boot.js']
+            'p16_reco.js','p17_baseline.js','p17b_ghg.js','p18_ebill.js','p19_pq.js','p19b_pqlink.js','p20_thermox.js','p14_custom.js','p15_bills.js','p12_pages.js','p13_boot.js']
 
 head  = rd('p1_head.html')
 shell = rd('p2_shell.html')

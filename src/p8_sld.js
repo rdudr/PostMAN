@@ -786,16 +786,16 @@ function importDrop(opts){
   var wrap = el('div');
   var zone = el('div','border:1.5px dashed var(--line);border-radius:8px;padding:' + (opts.compact ? '10px 12px' : '16px') +
     ';background:var(--panel-2);cursor:pointer;text-align:center;transition:border-color .15s;');
-  var i = el('input'); i.type = 'file'; i.accept = '.xlsx,.xls,.csv'; i.multiple = true; i.style.display = 'none';
+  var i = el('input'); i.type = 'file'; i.accept = '.xlsx,.xls,.csv,.json'; i.multiple = true; i.style.display = 'none';
   zone.appendChild(el('div','font-weight:600;font-size:13px;', opts.label || 'Drop workbooks here, or click to choose'));
   zone.appendChild(el('div','font-size:11.5px;color:var(--ink-3);margin-top:3px;', opts.hint ||
-    'Any number at once: JET-Eff, A-CMP, the FOX KISEM export, the Thermo-X exchange file, PQ analyser \u201cPostMan exports\u201d or a module workbook. Each file is identified from its own contents and checked against this report\u2019s company.'));
+    'Any number at once: JET-Eff, A-CMP, the FOX KISEM export, the Thermo-X exchange file, PQ analyser \u201cPostMan exports\u201d (Excel or the JSON bundle) or a module workbook. Each file is identified from its own contents and checked against this report\u2019s company.'));
   zone.appendChild(i);
   var out = el('div','margin-top:8px;font-size:12px;'); out.hidden = true;
   wrap.appendChild(zone); wrap.appendChild(out);
 
   var run = function(files){
-    files = Array.prototype.slice.call(files || []).filter(function(f){ return /\.(xlsx|xls|csv)$/i.test(f.name); });
+    files = Array.prototype.slice.call(files || []).filter(function(f){ return /\.(xlsx|xls|csv|json)$/i.test(f.name); });
     if (!files.length) return;
     var lines = [], k = 0;
     var next = function(){
@@ -810,6 +810,15 @@ function importDrop(opts){
         return;
       }
       var f = files[k++];
+      if (/\.json$/i.test(f.name)){
+        /* A PostMan bundle from the PQ analyser: the findings, not a workbook. */
+        f.text().then(function(txt){
+          try { lines.push(['ok', f.name + ': ' + importPqBundle(JSON.parse(txt), f.name)]); }
+          catch (err){ lines.push(['bad', f.name + ': ' + err.message]); }
+          next();
+        }).catch(function(e){ lines.push(['bad', f.name + ': ' + e.message]); next(); });
+        return;
+      }
       readWorkbook(f).then(function(wb){
         try {
           var log = importAny(wb, f.name);

@@ -25,7 +25,7 @@
    =================================================================== */
 
 /* ---- state shape ---- */
-function blankPq(){ return { recordings: [] }; }
+function blankPq(){ return { recordings: [], server: '' }; }
 function pqState(){
   if (!S.pq) S.pq = blankPq();
   if (!Array.isArray(S.pq.recordings)) S.pq.recordings = [];
@@ -466,11 +466,13 @@ function buildDistSection(B){
   });
   if (d.pcc.length){
     B.push(blk(bH(3,'Plant section-wise energy consumption — PCC load summary')));
-    B.push(tblBlock(['Panel','Fed from','Voltage','Current','kW','kVA','PF','%V THD','%I THD'],
-      d.pcc.map(function(r){ return [r.name, r.main || '', fix(num(r.v)), fix(num(r.i)), fix(num(r.kw)), fix(num(r.kva)), fix(num(r.pf),3),
-        { v:fix(num(r.vthd)), tone:(num(r.vthd) > 5 ? 'bad' : null) }, { v:fix(num(r.ithd)), tone:(num(r.ithd) > 8 ? 'bad' : null) }]; }),
-      { size:8, colw:['20%','14%','9%','9%','9%','9%','8%','11%','11%'] }));
-    B.push(blk(bNote('Red cells exceed the IEEE-519:2022 limits of 5 % voltage THD and 8 % current THD.')));
+    var anyScore = d.pcc.some(function(r){ return pqScoreOf(r) !== null; });
+    B.push(tblBlock(['Panel','Fed from','Voltage','Current','kW','kVA','PF','%V THD','%I THD'].concat(anyScore ? ['Compliance'] : []),
+      d.pcc.map(function(r){ var sc = pqScoreOf(r); return [r.name, r.main || '', fix(num(r.v)), fix(num(r.i)), fix(num(r.kw)), fix(num(r.kva)), fix(num(r.pf),3),
+        { v:fix(num(r.vthd)), tone:(num(r.vthd) > 5 ? 'bad' : null) }, { v:fix(num(r.ithd)), tone:(num(r.ithd) > 8 ? 'bad' : null) }]
+        .concat(anyScore ? [sc === null ? '—' : { v:sc + ' %', tone:(sc >= 80 ? 'ok' : sc >= 55 ? 'watch' : 'bad') }] : []); }),
+      { size:8, colw: anyScore ? ['18%','12%','8%','8%','8%','8%','7%','10%','10%','11%'] : ['20%','14%','9%','9%','9%','9%','8%','11%','11%'] }));
+    B.push(blk(bNote('Red cells exceed the IEEE-519:2022 limits of 5 % voltage THD and 8 % current THD.' + (anyScore ? ' Compliance is the PQ analyser’s standards score for the panel’s recording.' : ''))));
     B.push(blk(bChart(chartGrouped(d.pcc.map(function(r){ return r.name; }),
       [{ name:'kW', color:PH[0], values:d.pcc.map(function(r){ return num(r.kw) || 0; }) }, { name:'kVA', color:PH[1], values:d.pcc.map(function(r){ return num(r.kva) || 0; }) }],
       'PCC panel loading', 'kW / kVA'), 'Active and apparent power at each PCC panel')));
@@ -582,10 +584,11 @@ FORMS.dist = function(w){
   if (d.foxUpload) c.appendChild(el('p','', uploadStamp())).className = 'callout good';
   else c.appendChild(el('p','', 'No FOX KISEM workbook imported yet.')).className = 'callout';
   var drop = el('div','margin-top:10px;');
-  drop.appendChild(importDrop({ compact:true, label:'Drop the FOX KISEM export and PQ analyser exports here, or click to choose', hint:'Any number of files in one go.' }));
+  drop.appendChild(importDrop({ compact:true, label:'Drop the FOX KISEM export and PQ analyser exports here, or click to choose', hint:'Any number of files in one go — the FOX workbook, PQ Excel exports or the analyser’s JSON bundles.' }));
   drop.appendChild(importLogBox());
   c.appendChild(drop);
   w.appendChild(c);
+  pqPullCard(w);
 
   if (S.pq.recordings.length){
     var c2 = card('Power quality recordings', 'Each recording prints under the panel it belongs to, with its charts in the annexure. Match them here if the recording ID did not line up automatically.');
