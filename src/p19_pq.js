@@ -565,7 +565,7 @@ function buildPqAnnexure(B){
     var roleName = { main:'Plant main input', pcc:'PCC panel', mcc:'MCC panel', motor:'Motor', other:'Recording' }[rec.role] || 'Recording';
     B.push(blk(bH(2, 'A.' + (i + 1) + ' ' + roleName + ' — ' + (rec.panel || rec.name) + (rec.recId ? ' (' + rec.recId + ')' : ''))));
     B.push(blk(bP((rec.instrument ? rec.instrument + '. ' : '') + (rec.start ? 'Recorded ' + rec.start + ' to ' + rec.end + ', ' : '') + inr(rec.samples) + ' samples.' + (rec.engineer ? ' Exported by ' + rec.engineer + (rec.exportedAt ? ' on ' + rec.exportedAt : '') + '.' : ''), { size:9.5, italic:true })));
-    recCharts(rec, 'vipfuch').forEach(function(c){ B.push(blk(bChart(c[1]))); });
+    pqAnnexCharts(B, rec);
   });
   B.push({ anchor:'annexure' });
 }

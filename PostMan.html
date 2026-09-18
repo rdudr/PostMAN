@@ -7373,7 +7373,7 @@ function buildPqAnnexure(B){
     var roleName = { main:'Plant main input', pcc:'PCC panel', mcc:'MCC panel', motor:'Motor', other:'Recording' }[rec.role] || 'Recording';
     B.push(blk(bH(2, 'A.' + (i + 1) + ' ' + roleName + ' \u2014 ' + (rec.panel || rec.name) + (rec.recId ? ' (' + rec.recId + ')' : ''))));
     B.push(blk(bP((rec.instrument ? rec.instrument + '. ' : '') + (rec.start ? 'Recorded ' + rec.start + ' to ' + rec.end + ', ' : '') + inr(rec.samples) + ' samples.' + (rec.engineer ? ' Exported by ' + rec.engineer + (rec.exportedAt ? ' on ' + rec.exportedAt : '') + '.' : ''), { size:9.5, italic:true })));
-    recCharts(rec, 'vipfuch').forEach(function(c){ B.push(blk(bChart(c[1]))); });
+    pqAnnexCharts(B, rec);
   });
   B.push({ anchor:'annexure' });
 }
@@ -7489,7 +7489,10 @@ function importPqBundle(b, fileName){
     harmV: (b.harmonics && b.harmonics.voltage) || [], harmI: (b.harmonics && b.harmonics.current) || [],
     /* the analyser's own findings */
     compliance: b.compliance || null, health: b.health || null, events: b.events || null,
-    quality: b.data_quality || null, observations: b.observations || [], bundle: true
+    quality: b.data_quality || null, observations: b.observations || [], cost: b.cost || null,
+    /* the dashboard's own charts, captured on the analyser when it was sent */
+    charts: (b.charts || []).filter(function(c){ return c && c.image; }).map(function(c){ return { title:String(c.title || 'Chart'), dataUrl:c.image, w:c.w || 1400, h:c.h || 560 }; }),
+    sentAt: b.sent_at || '', bundle: true
   };
   var key = (rec.recId || rec.name).toLowerCase();
   S.pq.recordings = S.pq.recordings.filter(function(r){ return (r.recId || r.name).toLowerCase() !== key; });
@@ -7523,7 +7526,7 @@ function pqPullSession(sid, role, panel, recId){
 function pqPullCard(w){
   pqState();
   var c = card('Pull from the PQ analyser',
-    'Connect to the AI-PQA server and take each recording\u2019s findings directly \u2014 no file in between. The server does the heavy work on the full recording (a week at one second is fine) and sends only what the report prints: statistics, thinned charts, harmonics, the IEEE 519 / EN 50160 compliance table, equipment health, detected events and the data-quality report.');
+    'On the analyser dashboard, Send to PostMan parks a recording here under its panel and recording ID; list them and import. What arrives is what the engineer saw: the processed statistics, the IEEE 519 / EN 50160 compliance table, equipment health, the cost of poor quality, detected events, the data-quality report and the dashboard\u2019s own charts. The server keeps a sent recording for 24 hours.');
   var row = el('div','display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;');
   var url = el('input'); url.type = 'text'; url.placeholder = PQ_DEFAULT_SERVER; url.value = S.pq.server || PQ_DEFAULT_SERVER;
   url.addEventListener('input', function(){ S.pq.server = url.value.trim(); save(); });
@@ -7535,7 +7538,7 @@ function pqPullCard(w){
     show('Asking the server\u2026');
     pqListSessions().then(function(sessions){
       clear(list);
-      if (!sessions.length){ show('The server has no recordings to offer. Process a file on the analyser first.', ''); return; }
+      if (!sessions.length){ show('Nothing has been sent from the analyser yet (or it has expired \u2014 the server keeps a sent recording for 24 hours). On the analyser dashboard, use Send to PostMan.', ''); return; }
       status.hidden = true;
       var panels = [{ v:'', t:'\u2014 type a panel name \u2014' }].concat(
         S.dist.mains.map(function(p){ return { v:'main|' + p.name + '|' + (p.recId || ''), t:'Main input \u2014 ' + p.name + (p.recId ? ' (' + p.recId + ')' : '') }; }),
@@ -7545,18 +7548,24 @@ function pqPullCard(w){
       sessions.forEach(function(s){
         var box = el('div','border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:8px;');
         var head = el('div','display:flex;gap:8px;align-items:center;flex-wrap:wrap;');
-        var chk = el('input'); chk.type = 'checkbox';
+        var chk = el('input'); chk.type = 'checkbox'; chk.checked = true;
         head.appendChild(chk);
-        head.appendChild(el('strong','', (s.filename || 'session ' + s.session_id.slice(0, 8)) + (s.plant_name ? ' \u2014 ' + s.plant_name : '')));
-        head.appendChild(el('span','font-size:11px;color:var(--ink-3);', [s.company_name, s.analyzer, s.audit_date, s.total_rows ? inr(s.total_rows) + ' rows' : '', s.in_memory ? 'in memory' : 'stored'].filter(Boolean).join(' \u00B7 ')));
+        var roleName = { main:'Plant main input', pcc:'PCC panel', mcc:'MCC panel' }[s.role] || s.role || '';
+        head.appendChild(el('strong','', (s.panel || 'session ' + s.session_id.slice(0, 8)) + (s.recording_id ? ' (' + s.recording_id + ')' : '') + (roleName ? ' \u2014 ' + roleName : '')));
+        head.appendChild(el('span','font-size:11px;color:var(--ink-3);', [s.plant_name || s.company_name, s.analyzer, s.engineer ? 'by ' + s.engineer : '', s.samples ? inr(s.samples) + ' samples' : '',
+          s.compliance_score !== null && s.compliance_score !== undefined ? 'compliance ' + s.compliance_score + ' %' : '', s.charts ? s.charts + ' charts' : '',
+          s.sent_at ? 'sent ' + s.sent_at : '', s.expires_at ? 'expires ' + s.expires_at : ''].filter(Boolean).join(' \u00B7 ')));
         box.appendChild(head);
+        /* The panel was chosen on the analyser; a FOX panel can still be
+           picked here if the names do not line up. */
         var g = el('div','display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-top:6px;');
         var sel = el('select'); panels.forEach(function(o){ var op = el('option','', o.t); op.value = o.v; sel.appendChild(op); });
-        var role = el('select'); [['main','Plant main input'],['pcc','PCC panel'],['mcc','MCC panel']].forEach(function(o){ var op = el('option','', o[1]); op.value = o[0]; role.appendChild(op); }); role.value = 'pcc';
-        var panel = el('input'); panel.type = 'text'; panel.placeholder = 'Panel name';
-        var rid = el('input'); rid.type = 'text'; rid.placeholder = 'Recording ID';
+        sel.options[0].text = s.panel ? '\u2014 as sent: ' + s.panel + ' \u2014' : '\u2014 type a panel name \u2014';
+        var role = el('select'); [['main','Plant main input'],['pcc','PCC panel'],['mcc','MCC panel']].forEach(function(o){ var op = el('option','', o[1]); op.value = o[0]; role.appendChild(op); }); role.value = s.role || 'pcc';
+        var panel = el('input'); panel.type = 'text'; panel.placeholder = 'Panel name'; panel.value = s.panel || '';
+        var rid = el('input'); rid.type = 'text'; rid.placeholder = 'Recording ID'; rid.value = s.recording_id || '';
         sel.addEventListener('change', function(){ if (!sel.value) return; var p = sel.value.split('|'); role.value = p[0]; panel.value = p[1]; rid.value = p[2] || rid.value; chk.checked = true; });
-        g.appendChild(labelled('Panel from FOX', sel)); g.appendChild(labelled('Measured at', role)); g.appendChild(labelled('Panel name', panel)); g.appendChild(labelled('Recording ID', rid));
+        g.appendChild(labelled('Match to a FOX panel', sel)); g.appendChild(labelled('Measured at', role)); g.appendChild(labelled('Panel name', panel)); g.appendChild(labelled('Recording ID', rid));
         box.appendChild(g);
         list.appendChild(box);
         picks.push({ s:s, chk:chk, role:role, panel:panel, rid:rid });
@@ -7570,7 +7579,12 @@ function pqPullCard(w){
           if (k >= chosen.length){ save(); renderAll(); var box2 = document.getElementById('importlog'); if (box2){ clear(box2); box2.hidden = false; lines.forEach(function(l){ var p = el('div','', l[1]); p.className = 'callout ' + (l[0] === 'bad' ? 'bad' : 'good'); p.style.margin = '0 0 4px'; box2.appendChild(p); }); } return; }
           var p = chosen[k++];
           pqPullSession(p.s.session_id, p.role.value, p.panel.value.trim(), p.rid.value.trim())
-            .then(function(b){ try { lines.push(['ok', importPqBundle(b)]); } catch (e){ lines.push(['bad', e.message]); } next(); })
+            .then(function(b){
+              /* What was typed here wins over what was sent, so a mismatch can be corrected without going back to the analyser. */
+              if (p.panel.value.trim()) b.panel = p.panel.value.trim();
+              if (p.rid.value.trim()) b.recording_id = p.rid.value.trim();
+              if (p.role.value) b.role = p.role.value;
+              try { lines.push(['ok', importPqBundle(b)]); } catch (e){ lines.push(['bad', e.message]); } next(); })
             .catch(function(e){ lines.push(['bad', (p.panel.value || p.s.session_id.slice(0, 8)) + ': ' + e.message]); next(); });
         };
         next();
@@ -7579,7 +7593,7 @@ function pqPullCard(w){
     }).catch(function(e){ show('Could not reach the analyser: ' + e.message + '. Check the address, and that the server is running with CORS open.', 'bad'); });
   }, 'primary'));
   c.appendChild(row); c.appendChild(status); c.appendChild(list);
-  c.appendChild(el('p','margin-top:8px;font-size:12px;color:var(--ink-3);', 'Offline instead: on the analyser dashboard, Export for PostMan \u2192 Download PostMan bundle (JSON), then drop the .json file in the box above.'));
+  c.appendChild(el('p','margin-top:8px;font-size:12px;color:var(--ink-3);', 'Offline instead: on the analyser dashboard, Send to PostMan \u2192 Save bundle file instead, then drop the .json file in the box above.'));
   w.appendChild(c);
 }
 
@@ -7648,19 +7662,63 @@ function pqQualityBlocks(B, rec){
   if (rec.observations && rec.observations.length) B.push(blk(bNote('Analyser observations: ' + rec.observations.join(' '))));
 }
 
+/* Cost of poor power quality, worked on the analyser's Cost page with the
+   tariff figures the engineer typed there. */
+function pqCostBlocks(B, rec){
+  var c = rec.cost; if (!c || !c.result) return;
+  var r = c.result, i = c.inputs || {}, cur = i.currency || '\u20b9';
+  var money = function(v){ return (v === null || v === undefined || !isFinite(v)) ? '\u2014' : cur + ' ' + inr(Math.round(v)); };
+  B.push(blk(bH(3, 'Cost of poor power quality \u2014 ' + (rec.recId || rec.name))));
+  B.push(blk(bKPI([
+    ['Annual leakage', money(r.totalLeak)], ['PF penalty', money(r.pfPenalty)], ['Harmonic losses', money(r.harmonicLoss)], ['Saving if PF corrected', money(r.totalPotential)]
+  ])));
+  B.push(tblBlock(['Item', 'Basis', 'Per year'], [
+    ['Energy cost', tfix(r.avgKw, 1) + ' kW avg \u00d7 ' + inr(r.annualHours) + ' h = ' + inr(Math.round(r.annualKwh)) + ' kWh \u00d7 ' + cur + ' ' + i.tariff + '/kWh', money(r.energyCost)],
+    ['Demand cost', tfix(r.avgKva, 1) + ' kVA \u00d7 ' + cur + ' ' + i.demandCharge + '/kVA/month \u00d7 12', money(r.demandCost)],
+    ['Low power factor penalty', 'PF ' + tfix(r.avgPf, 3) + (r.pfDeficit > 0 ? ' is ' + tfix(r.pfDeficit, 2) + ' below ' + i.pfThreshold + ': ' + tfix(r.pfPenaltyPctTotal, 1) + ' % of the bill' : ' meets the ' + i.pfThreshold + ' threshold'), { v:money(r.pfPenalty), tone:(r.pfPenalty > 0 ? 'bad' : 'ok') }],
+    ['Harmonic losses', 'V-THD ' + tfix(r.vthd, 2) + ' % \u2248 ' + tfix(r.harmonicLossPct, 2) + ' % of energy cost (0.5 % per 1 % THD)', { v:money(r.harmonicLoss), tone:(r.harmonicLoss > 0 ? 'watch' : null) }],
+    ['kVA reduction if PF raised to ' + tfix(r.targetPf, 2), tfix(r.avgKva, 0) + ' \u2192 ' + tfix(r.newKva, 0) + ' kVA billed', { v:money(r.kvaSavings), tone:'ok' }],
+    [{v:'Total recoverable per year',tone:'head'}, {v:'penalty + harmonic losses + demand saving',tone:'head'}, {v:money(r.totalPotential),tone:'head'}]
+  ], { colw:['26%','50%','24%'] }));
+  B.push(blk(bP('Tariff figures as entered on the analyser: ' + cur + ' ' + i.tariff + '/kWh, ' + cur + ' ' + i.demandCharge + '/kVA/month, ' + i.hoursPerDay + ' h/day, ' + i.daysPerYear + ' days/year, penalty ' + i.pfPenaltyPct + ' % per 0.01 below PF ' + i.pfThreshold + '. Rule-of-thumb figures for scale; the bill analysis chapter carries the tariff-exact working.', { size:9, italic:true })));
+}
+
+/* The analyser's charts, as captured on its dashboard, in place of a
+   redrawing. `which` is a regex over the chart titles. */
+function pqChartBlocks(B, rec, which){
+  (rec.charts || []).filter(function(c){ return which.test(c.title); }).forEach(function(c){ B.push(blk(bImg(c, c.title + ' \u2014 ' + (rec.recId || rec.name) + ' (AI-PQA)', 210))); });
+}
+
 /* The full recording section a bundle earns under its panel: the measured
    summary the workbook route also prints, then the analyser's findings. */
 var _recSummaryBlocksPlain = recSummaryBlocks;
 recSummaryBlocks = function(B, rec){
-  _recSummaryBlocksPlain(B, rec);
+  if (rec.charts && rec.charts.length){
+    /* Measured table and observation as before, but the analyser's own
+       PF and THD charts rather than PostMan's redrawing of the series. */
+    var keep = recCharts; recCharts = function(){ return []; };
+    try { _recSummaryBlocksPlain(B, rec); } finally { recCharts = keep; }
+    pqChartBlocks(B, rec, /Power Factor|THD/i);
+  } else _recSummaryBlocksPlain(B, rec);
   if (!rec.bundle) return;
   if (rec.stats && (rec.stats.vImb !== undefined || rec.stats.iImb !== undefined))
     B.push(blk(bP('Three-phase imbalance over the recording: voltage ' + fix(rec.stats.vImb, 2) + ' %, current ' + fix(rec.stats.iImb, 2) + ' %.', { size:9.5 })));
   pqComplianceBlocks(B, rec);
   pqHealthBlocks(B, rec);
+  pqCostBlocks(B, rec);
   pqEventBlocks(B, rec);
   pqQualityBlocks(B, rec);
 };
+
+/* Annexure: every dashboard chart the analyser captured, in its order;
+   PostMan's own drawings only for a recording that arrived as a workbook. */
+var _recChartsPlain = recCharts;
+function pqAnnexCharts(B, rec){
+  if (rec.charts && rec.charts.length){
+    rec.charts.forEach(function(c){ B.push(blk(bImg(c, c.title + ' (AI-PQA)', 210))); });
+    if (rec.sentAt) B.push(blk(bP('Charts as captured on the AI-PQA dashboard when the recording was sent to PostMan on ' + rec.sentAt + '.', { size:9, italic:true })));
+  } else _recChartsPlain(rec, 'vipfuch').forEach(function(c){ B.push(blk(bChart(c[1]))); });
+}
 
 /* The PCC summary and the executive overview get a compliance column. */
 function pqScoreOf(panel){
