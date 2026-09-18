@@ -76,8 +76,18 @@ beside the fields.
 
    The two feeds: the **FOX KISEM** app's Excel export (sheets *Plant Main
    Inputs, PCC Panels, MCC Panels, Motor Loads Clamp, Motor Loads PQ, APFC*)
-   and the **AI-PQA** analyser's *Export for PostMan* workbook (format
-   `PostMan-PQ v1`, one recording per file). They are joined by the
+   and the **AI-PQA** analyser. The analyser is best taken live: on the
+   Electrical distribution page enter the analyser server's address, list
+   its recordings, say which panel each was measured at and import — the
+   server does the heavy work on the whole recording (a week at one second
+   is fine) and sends only the findings. Each panel's section then carries
+   the analyser's own **standards compliance** table (IEEE 519, EN 50160,
+   IEC 61000-3-14, PF — measured, limit, verdict, remark, score),
+   **equipment health** (five scored components), **events detected**
+   (counts, the worst events, dips and swells), data quality and
+   observations; the PCC load summary gains a Compliance column. Offline,
+   the dashboard's *Download PostMan bundle (JSON)* or the Excel export
+   drop into the same box. Recordings are joined to panels by the
    *Recording ID* written on the FOX panel sheet. The contracts are written
    up in `docs/POSTMAN_EXPORT.md` of the AI-PQA repository
    (https://github.com/rdudr/AI-PQA) and `docs/POSTMAN_IMPORT.md` of the FOX
