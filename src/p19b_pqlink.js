@@ -79,9 +79,9 @@ function pqPullCard(w){
   var c = card('Pull from the PQ analyser',
     'Connect to the AI-PQA server and take each recording’s findings directly — no file in between. The server does the heavy work on the full recording (a week at one second is fine) and sends only what the report prints: statistics, thinned charts, harmonics, the IEEE 519 / EN 50160 compliance table, equipment health, detected events and the data-quality report.');
   var row = el('div','display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;');
-  var url = el('input'); url.type = 'text'; url.placeholder = 'https://your-analyser-server'; url.value = S.pq.server || '';
+  var url = el('input'); url.type = 'text'; url.placeholder = PQ_DEFAULT_SERVER; url.value = S.pq.server || PQ_DEFAULT_SERVER;
   url.addEventListener('input', function(){ S.pq.server = url.value.trim(); save(); });
-  var f = labelled('Analyser server address', url); f.style.flex = '1 1 260px'; row.appendChild(f);
+  var f = labelled('Analyser server address', url, 'The address you open the AI-PQA dashboard at — the team’s Hugging Face Space by default; http://127.0.0.1:8000 when the backend runs on this machine.'); f.style.flex = '1 1 260px'; row.appendChild(f);
   var list = el('div','margin-top:10px;');
   var status = el('p',''); status.className = 'callout'; status.hidden = true;
   var show = function(msg, cls){ status.textContent = msg; status.className = 'callout ' + (cls || ''); status.hidden = false; };

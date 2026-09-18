@@ -25,7 +25,10 @@
    =================================================================== */
 
 /* ---- state shape ---- */
-function blankPq(){ return { recordings: [], server: '' }; }
+/* The team's analyser lives on Hugging Face Spaces; a local run of the
+   backend (http://127.0.0.1:8000) or any other deployment can replace it. */
+var PQ_DEFAULT_SERVER = 'https://rishabhdangi-ai-power-quality-analyzer.hf.space';
+function blankPq(){ return { recordings: [], server: PQ_DEFAULT_SERVER }; }
 function pqState(){
   if (!S.pq) S.pq = blankPq();
   if (!Array.isArray(S.pq.recordings)) S.pq.recordings = [];
