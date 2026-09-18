@@ -7503,7 +7503,8 @@ function importPqBundle(b, fileName){
 /* ------------------------------------------------------------------
    PULLING FROM THE ANALYSER SERVER
    ------------------------------------------------------------------ */
-function pqServerUrl(){ pqState(); return String(S.pq.server || '').replace(/\/+$/, ''); }
+/* An empty field means the team's default server, which is what the field shows. */
+function pqServerUrl(){ pqState(); return String(S.pq.server || PQ_DEFAULT_SERVER).replace(/\/+$/, ''); }
 function pqFetchJson(path){
   var base = pqServerUrl();
   if (!base) return Promise.reject(new Error('Enter the analyser server address first.'));
