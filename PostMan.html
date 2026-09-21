@@ -2990,13 +2990,33 @@ function jetsRollUp(){
   r.roi = (r.total > 0 && r.invest > 0) ? (r.invest / r.total) * 12 : null;
   return r;
 }
+/* The A-CMP team-exchange workbook (Report -> Team Data Exchange -> Export /
+   Share, and the file attached to every emailed report): a "Company Profile"
+   sheet and a "Compressor Entries" sheet whose columns are the app's own
+   field names, plus four derived columns the app writes for us
+   (pumpTankVolumeM3, luLoadHours, luUnloadHours, luTotalHours). The
+   contract is docs/POSTMAN.md in A-CMP; lib/compressor-excel.ts writes it. */
+var ACMP_SHEET = 'Compressor Entries';
+function isACmpWorkbook(wb){
+  var s = findSheet(wb, ACMP_SHEET) || findSheet(wb, 'A-CMP');
+  if (!s) return false;
+  return headersOf(wb, s).map(normKey).indexOf('machinetag') >= 0;
+}
 function importACmp(wb){
   var log = [];
-  var rows = sheetRows(wb, 'Compressors');
-  if (!rows.length) rows = sheetRows(wb, 'Compressor Entries');
+  var s = findSheet(wb, ACMP_SHEET) || findSheet(wb, 'A-CMP') || findSheet(wb, 'Compressors');
+  var rows = s ? sheetRows(wb, s) : [];
   if (!rows.length) return log;
   var incoming = rows.map(function(r){
-    return { tag: pick(r,['machineTag','Machine Tag']) || '',
+    /* Receiver volume: the app records what the engineer typed (litres or
+       m\u00B3) and also writes the m\u00B3 figure; take that, or convert. */
+    var tankVol = num(pick(r,['pumpTankVolumeM3']));
+    if (tankVol === null){
+      tankVol = num(pick(r,['pumpTankVolume']));
+      if (tankVol !== null && /^l/i.test(String(pick(r,['pumpTankVolumeUnit']) || ''))) tankVol = tankVol / 1000;
+    }
+    var pumpCfm = num(pick(r,['pumpActualFadCfm']));
+    return { tag: String(pick(r,['machineTag','Machine Tag']) || '').trim(),
       make: pick(r,['makeModel','Make / Model']) || '',
       type: pick(r,['compressorType','Type']) || 'Screw',
       year: pick(r,['yearOfManufacture','Year']) || '',
@@ -3006,22 +3026,25 @@ function importACmp(wb){
       processPressure: num(pick(r,['processPressure'])),
       ratedKw: num(pick(r,['ratedKw','Rated kW'])),
       motorEff: num(pick(r,['motorEfficiency'])),
-      testType: (num(pick(r,['pumpActualFadCfm'])) ? 'Pump-up' : 'FAD'),
+      testType: (pumpCfm ? 'Pump-up' : 'FAD'),
       suctionArea: num(pick(r,['fadSuctionArea'])),
       avgVelocity: num(pick(r,['fadAvgVelocity'])),
       pumpP1: num(pick(r,['pumpP1'])), pumpP2: num(pick(r,['pumpP2'])),
-      pumpTime: num(pick(r,['pumpTimeSec'])), tankVol: num(pick(r,['pumpTankVolume'])),
-      measuredKw: num(pick(r,['genLoadKw','measuredKw','fadMeasuredPower'])),
-      runningPressure: num(pick(r,['fadRunningPressure','pumpRunningPressure'])),
-      loadHrs:null, unloadHrs:null, totalHrs:null, hoursPerDay:24,
-      obs: pick(r,['description','fadDescription']) || '' };
-  });
+      pumpTime: num(pick(r,['pumpTimeSec'])), tankVol: tankVol,
+      measuredKw: num(pick(r,['genLoadKw','measuredKw','pumpMeasuredPower','fadMeasuredPower'])),
+      runningPressure: num(pick(r,[pumpCfm ? 'pumpRunningPressure' : 'fadRunningPressure','fadRunningPressure','pumpRunningPressure'])),
+      loadHrs: num(pick(r,['luLoadHours'])), unloadHrs: num(pick(r,['luUnloadHours'])),
+      totalHrs: num(pick(r,['luTotalHours'])), hoursPerDay:24,
+      obs: [pick(r,['description']), pick(r,['fadDescription']), pick(r,['pumpDescription'])]
+             .filter(function(t){ return t; }).join(' ') };
+  }).filter(function(n){ return n.tag; });   /* Excel loves trailing blank rows */
+  if (!incoming.length) return log;
   /* A compressor already in the report (same tag) is replaced, the rest
      kept, so re-importing or a second partial file never duplicates. */
-  var keep = (S.compressor || []).filter(function(k){ return !incoming.some(function(n){ return n.tag && normKey(n.tag) === normKey(k.tag); }); });
+  var keep = (S.compressor || []).filter(function(k){ return !incoming.some(function(n){ return normKey(n.tag) === normKey(k.tag); }); });
   S.compressor = keep.concat(incoming);
   S.enabled.compressor = true;
-  log.push(incoming.length + ' compressor' + (incoming.length === 1 ? '' : 's'));
+  log.push(incoming.length + ' compressor' + (incoming.length === 1 ? '' : 's') + ' from A-CMP');
   return log;
 }
 
@@ -3531,6 +3554,17 @@ function importAny(wb, fileName){
         !confirm('DIFFERENT COMPANY\n\nThis FOX workbook is for:\n    ' + theirsF + '\n\nThis report is for:\n    ' + oursF + '\n\nPress Cancel to stop.'))
       throw new Error('Import cancelled. That workbook belongs to ' + theirsF + ', not to this report.');
     return importFox(wb, fileName);
+  }
+  if (isACmpWorkbook(wb)){
+    var theirsA = workbookCompany(wb), oursA = S.company.name;
+    if (theirsA && oursA && !sameCompany(theirsA, oursA) &&
+        !confirm('DIFFERENT COMPANY\n\nThis A-CMP file is for:\n    ' + theirsA + '\n\nThis report is for:\n    ' + oursA + '\n\nPress Cancel to stop.'))
+      throw new Error('Import cancelled. That file belongs to ' + theirsA + ', not to this report.');
+    if (theirsA && !oursA) S.company.name = theirsA;
+    var logA = importACmp(wb);
+    if (!logA.length) throw new Error('The A-CMP file was recognised but has no compressor rows.');
+    if (theirsA) logA.push('company verified as ' + theirsA);
+    return logA;
   }
   var pqSheet = null;
   Object.keys(wb.Sheets).forEach(function(n){ if (!pqSheet && isPqDataSheet(wb, n)) pqSheet = n; });
