@@ -1,16 +1,17 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
+import { APP, PDFJS, PDFJS_W, XLSX_JS, fx } from './_paths.mjs';
 const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium' });
 const pg = await b.newPage({ viewport:{width:1600,height:1050} });
 const errs=[]; pg.on('pageerror',e=>errs.push(e.message));
 pg.on('console',m=>{ if(m.type()==='error' && !/ERR_TUNNEL|ERR_NAME|fonts\.g/.test(m.text())) errs.push('console: '+m.text()); });
-await pg.goto('file:///home/claude/pm/app.html');
-await pg.addScriptTag({ path:'node_modules/xlsx/dist/xlsx.full.min.js' });
+await pg.goto(APP);
+await pg.addScriptTag({ path:XLSX_JS });
 // pdf.js from CDN is unreachable offline — inject the same pinned build locally
 // cdnjs is unreachable offline — inject the same pinned pair locally, the
 // main library and the worker-as-a-script that makes the fake-worker path work
-await pg.addScriptTag({ path:'node_modules/pdfjs-dist/build/pdf.min.js' });
-await pg.addScriptTag({ path:'node_modules/pdfjs-dist/build/pdf.worker.min.js' });
+await pg.addScriptTag({ path:PDFJS });
+await pg.addScriptTag({ path:PDFJS_W });
 await pg.waitForTimeout(700);
 const s = await pg.$('text=Load sample'); if (s){ await s.click(); await pg.waitForTimeout(400); }
 
@@ -19,7 +20,7 @@ await pg.evaluate(()=>{
   S.bills = [];  // start clean so matching is exercised honestly
 });
 
-const pdf = fs.readFileSync('t/bills-12-months.pdf').toString('base64');
+const pdf = fs.readFileSync(fx('bills-12-months.pdf')).toString('base64');
 const out = await pg.evaluate(async (b64) => {
   const bin=atob(b64), arr=new Uint8Array(bin.length);
   for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);

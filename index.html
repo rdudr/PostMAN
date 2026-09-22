@@ -428,6 +428,7 @@ function blankState(){
     team:{ plant:[], iea:defaultIeaTeam() },
     production:{ intro:'', products:[], website:'', phone:'', mail:'', factoryAddress:'', flowNote:'' },
     baseline:blankBaseline(),
+    appUrls:{},            /* where each field app lives; see p21_sources.js */
     bills:[],
     billCursor:0,
     billNotes:{ pfNote:'', cdNote:'', todNote:'' },
@@ -672,6 +673,7 @@ var SECTIONS = [
 
   { id:'custom',      group:'Closing', title:'Your own pages',   always:true },
   { id:'instruments', group:'Closing', title:'Instruments used', always:true },
+  { id:'sources',     group:'Closing', title:'Data sources',       always:true, tool:true },
   { id:'imports',     group:'Closing', title:'Import field data', always:true, tool:true },
   { id:'costs',       group:'Closing', title:'Cost register',     always:true, tool:true }
 ];
@@ -1017,7 +1019,7 @@ function completion(sec){
     case 'ledger': return S.ledger.length ? (rollUp(S.ledger).draft ? 'part' : 'on') : '';
     case 'production': return S.production.intro ? 'on' : '';
     case 'baseline': return S.baseline.elec.some(function(r){ return num(r.kwh); }) ? 'on' : '';
-    case 'water': return S.baseline.water.length ? 'on' : '';
+    case 'water': return (S.baseline.waterRows || []).length ? 'on' : '';
     case 'bills': return S.bills.length ? 'on' : '';
     /* Amber until every bill has been looked at by a person. */
     case 'verify': return S.bills.length ? (billsProgress().left ? 'part' : 'on') : '';
@@ -1783,30 +1785,76 @@ FORMS.compressor = function(w){
     w.appendChild(b);
   });
 };
+/* The compressor's arithmetic, with A-CMP's own answers preferred.
+
+   A-CMP does two things this quick formula does not: its FAD test averages
+   an anemometer traverse across the suction area rather than taking one
+   reading, and its pump-up test applies the temperature correction
+   273/(273+T), which moves the answer several per cent in a hot compressor
+   room. Recomputing and printing that instead would put a different number
+   in the report from the one on the engineer's screen, with nothing to say
+   which is right.
+
+   So the app's figure wins where it exists, the recomputation fills a gap
+   and cross-checks, and where the two differ by more than 3 % - wider than
+   rounding, narrower than a real formula change - the report says so. */
 function compressorCalc(k){
   var ratedCFM = toCFM(k.ratedCap, k.capUnit);
   var ratedKw = num(k.ratedKw);
-  var designSEC = (ratedKw && ratedCFM) ? ratedKw / ratedCFM : null;
-  var designAirGen = (ratedKw && ratedCFM) ? ratedCFM / ratedKw : null;
-  var actualCFM = null;
-  if (k.testType === 'FAD'){
+
+  var designSEC = num(k.designedSec);
+  if (designSEC === null) designSEC = (ratedKw && ratedCFM) ? ratedKw / ratedCFM : null;
+  var designAirGen = num(k.designedAirGen);
+  if (designAirGen === null) designAirGen = (ratedKw && ratedCFM) ? ratedCFM / ratedKw : null;
+
+  var isPump = k.testType === 'Pump-up';
+  var appCFM = isPump ? num(k.pumpActualFadCfm) : num(k.fadAirDeliveryCfm);
+  var appSEC = num(k.fadActualSec);
+  var appGen = num(k.fadActualAirGen);
+
+  var ownCFM = null;
+  if (!isPump){
     var a = num(k.suctionArea), v = num(k.avgVelocity);
-    if (a !== null && v !== null) actualCFM = a * v * 2118.88;   /* m\u00B3/s -> CFM */
+    if (a !== null && v !== null) ownCFM = a * v * 2118.88;        /* m3/s -> CFM */
   } else {
     var p1 = num(k.pumpP1), p2 = num(k.pumpP2), t = num(k.pumpTime), vol = num(k.tankVol);
-    if (p1 !== null && p2 !== null && t && vol)
-      actualCFM = ((p2 - p1) * vol * 60 / (1.01325 * t)) * 35.3147;
+    if (p1 !== null && p2 !== null && t && vol){
+      ownCFM = ((p2 - p1) * vol * 60 / (1.01325 * t)) * 35.3147;
+      var tf = num(k.pumpTempFactor);
+      if (tf === null && num(k.pumpAirTemp) !== null) tf = 273 / (273 + num(k.pumpAirTemp));
+      if (tf) ownCFM *= tf;
+    }
   }
+
+  var actualCFM = appCFM !== null ? appCFM : ownCFM;
+  var drift = false;
+  if (appCFM !== null && ownCFM !== null && appCFM > 0 &&
+      Math.abs(appCFM - ownCFM) / appCFM > 0.03) drift = true;
+
   var mkw = num(k.measuredKw);
-  var actualSEC = (mkw && actualCFM) ? mkw / actualCFM : null;
-  var actualAirGen = (mkw && actualCFM) ? actualCFM / mkw : null;
+  if (mkw === null) mkw = num(k.genLoadKw);
+
+  var actualSEC = appSEC !== null ? appSEC : ((mkw && actualCFM) ? mkw / actualCFM : null);
+  var actualAirGen = appGen !== null ? appGen : ((mkw && actualCFM) ? actualCFM / mkw : null);
   var deviation = (designSEC && actualSEC) ? ((actualSEC - designSEC) / designSEC) * 100 : null;
-  var lh = num(k.loadHrs), th = num(k.totalHrs);
-  var loadPct = (lh !== null && th) ? (lh/th)*100 : null;
-  var annualKwh = (mkw && num(k.hoursPerDay)) ? mkw * num(k.hoursPerDay) * (num(S.costs.days) || 350) : null;
+
+  var lh = num(k.loadHrs), uh = num(k.unloadHrs), th = num(k.totalHrs);
+  if (th === null && lh !== null && uh !== null) th = lh + uh;
+  var loadPct = (lh !== null && th) ? (lh / th) * 100 : null;
+
+  var unloadKw = num(k.genUnloadKw);
+  var days = num(k.annualOperatingDays) || num(S.costs.days) || 350;
+  var hrs = num(k.hoursPerDay); if (hrs === null) hrs = 24;
+  var idleKwh = (unloadKw !== null && loadPct !== null)
+    ? unloadKw * hrs * (1 - loadPct / 100) * days : null;
+  var annualKwh = (mkw && hrs) ? mkw * hrs * days : null;
+
   return { ratedCFM:ratedCFM, designSEC:designSEC, designAirGen:designAirGen,
            actualCFM:actualCFM, actualSEC:actualSEC, actualAirGen:actualAirGen,
-           deviation:deviation, loadPct:loadPct, annualKwh:annualKwh };
+           appCFM:appCFM, ownCFM:ownCFM, drift:drift, testType:isPump ? 'Pump-up' : 'FAD',
+           measuredKw:mkw, unloadKw:unloadKw,
+           deviation:deviation, loadPct:loadPct, idleKwh:idleKwh, annualKwh:annualKwh,
+           days:days, hrs:hrs };
 }
 
 FORMS.coolingTower = function(w){
@@ -2837,6 +2885,77 @@ function syncJetLedger(){
   return n;
 }
 
+
+/* The compressor equivalent of syncJetLedger: the two things a compressor
+   survey actually finds, priced, so they reach the executive summary and the
+   savings table rather than sitting in the module where nobody adds them up.
+
+   Only the EXCESS over design SEC is counted as recoverable, not the whole
+   consumption. A compressor 17 % above design does not stop using power when
+   it is fixed; it uses what the design says it should.  */
+function syncCompressorLedger(){
+  var rate = num(S.costs.unitRate);
+  var gef = num(S.costs.gridEF) || 0.716;
+
+  var sec = S.compressor.map(function(k){ return { k:k, d:compressorCalc(k) }; })
+    .filter(function(x){ return x.d.deviation !== null && x.d.deviation > 10 && x.d.annualKwh; });
+  var idle = S.compressor.map(function(k){ return { k:k, d:compressorCalc(k) }; })
+    .filter(function(x){ return x.d.loadPct !== null && x.d.loadPct < 60 && x.d.idleKwh; });
+
+  var specs = [];
+  if (sec.length){
+    var kwh = 0, tags = [];
+    sec.forEach(function(x){
+      kwh += x.d.annualKwh * (x.d.deviation / (100 + x.d.deviation));
+      tags.push(x.k.tag || 'compressor');
+    });
+    kwh = Math.round(kwh);
+    specs.push({ key:'cmp-sec', type:'electrical', priority:'high',
+      observation: tags.join(', ') + ' measured ' +
+        fix(sec.reduce(function(a,x){ return a + x.d.deviation; }, 0) / sec.length, 1) +
+        ' % above design specific energy consumption on the ' +
+        (sec[0].d.testType === 'Pump-up' ? 'pump-up' : 'free air delivery') + ' test.',
+      recommendation:'Overhaul or service the compressors running above design SEC - air-end clearances, ' +
+        'intake filter, inter- and after-cooler fouling and belt slip are the usual causes - and repeat the ' +
+        'capacity test to confirm the recovery.',
+      unit:'kWh/yr', saving:kwh, monetary:Math.round(kwh * (rate || 0)), investment:0,
+      co2: Math.round(kwh * gef / 1000 * 10) / 10 });
+  }
+  if (idle.length){
+    var ikwh = Math.round(idle.reduce(function(a,x){ return a + x.d.idleKwh; }, 0));
+    specs.push({ key:'cmp-idle', type:'electrical', priority:'medium',
+      observation: idle.map(function(x){ return (x.k.tag || 'compressor') + ' loaded only ' +
+        fix(x.d.loadPct,1) + ' % of its running hours'; }).join('; ') +
+        ', drawing unload power for the rest.',
+      recommendation:'Sequence the compressors so that one machine trims and the rest run loaded or stop, ' +
+        'and fix the leaks that keep an unloaded machine cycling. A variable speed drive on the trim machine ' +
+        'is the next step where the load swings.',
+      unit:'kWh/yr', saving:ikwh, monetary:Math.round(ikwh * (rate || 0)), investment:0,
+      co2: Math.round(ikwh * gef / 1000 * 10) / 10 });
+  }
+
+  var n = 0;
+  specs.forEach(function(sp){
+    var row = null;
+    for (var i = 0; i < S.ledger.length; i++)
+      if (S.ledger[i].autoKey === sp.key){ row = S.ledger[i]; break; }
+    if (row && row.locked) return;
+    if (!row){ row = { id:uid(), autoKey:sp.key, module:'compressor', status:'draft', actionBy:'Plant' };
+               S.ledger.push(row); }
+    row.module = 'compressor'; row.type = sp.type; row.priority = sp.priority;
+    row.observation = sp.observation; row.recommendation = sp.recommendation;
+    row.unit = sp.unit; row.saving = sp.saving; row.monetary = sp.monetary;
+    row.investment = sp.investment; row.co2 = sp.co2;
+    row.consumption = row.consumption || null;
+    n++;
+  });
+  var live = {}; specs.forEach(function(sp){ live[sp.key] = 1; });
+  S.ledger = S.ledger.filter(function(r){
+    return !r.autoKey || !/^cmp-/.test(r.autoKey) || live[r.autoKey] || r.locked;
+  });
+  return n;
+}
+
 /* ===================================================================
    JET-Eff record model, mirrored exactly.
 
@@ -3035,6 +3154,48 @@ function importACmp(wb){
       runningPressure: num(pick(r,[pumpCfm ? 'pumpRunningPressure' : 'fadRunningPressure','fadRunningPressure','pumpRunningPressure'])),
       loadHrs: num(pick(r,['luLoadHours'])), unloadHrs: num(pick(r,['luUnloadHours'])),
       totalHrs: num(pick(r,['luTotalHours'])), hoursPerDay:24,
+
+      /* What A-CMP itself computed. These used to be dropped and the
+         figures recomputed here from the raw inputs, which put a different
+         number in the report from the one on the engineer's own screen with
+         nothing to say which was right. On the AC-02 fixture the difference
+         is 15 % on delivered air, because the app's pump-up test applies the
+         temperature correction 273/(273+T) and the quick formula does not,
+         and its FAD test averages an anemometer traverse rather than taking
+         one reading. compressorCalc prefers these and says so when the
+         recomputed value disagrees by more than 3 %. */
+      designedSec: num(pick(r,['designedSec'])),
+      designedAirGen: num(pick(r,['designedAirGen'])),
+      fadAirDeliveryCfm: num(pick(r,['fadAirDeliveryCfm'])),
+      pumpActualFadCfm: pumpCfm,
+      fadActualSec: num(pick(r,['fadActualSec'])),
+      fadActualAirGen: num(pick(r,['fadActualAirGen'])),
+      /* A-CMP writes the compressed-air temperature AND the factor it
+         derived from it. Take the factor when it is there; deriving it again
+         from the temperature is only the fallback. */
+      pumpAirTemp: num(pick(r,['pumpAirTempC','pumpAirTemp'])),
+      pumpTempFactor: num(pick(r,['pumpTempFactor'])),
+
+      /* Unloaded running is the other half of the compressor story: a
+         machine idling half its life burns real money making no air. */
+      genLoadKw: num(pick(r,['genLoadKw'])),
+      genUnloadKw: num(pick(r,['genUnloadKw'])),
+      annualOperatingDays: num(pick(r,['annualOperatingDays'])),
+      powerCost: num(pick(r,['powerCost'])),
+
+      /* Carried under A-CMP's own names because PostMan has no counterpart.
+         A column added there therefore reaches the report with no code
+         change here. */
+      serialNo: pick(r,['serialNo']) || '',
+      ratedHp: num(pick(r,['ratedHp'])),
+      starter: pick(r,['starterType']) || '',
+      recordedBy: pick(r,['recordedBy']) || '',
+      obsThermalImageNo: pick(r,['obsThermalImageNo']) || '',
+      obsCompDischarge: num(pick(r,['obsCompDischarge'])),
+      obsOilCooler: num(pick(r,['obsOilCooler'])),
+      obsAfterCooler: num(pick(r,['obsAfterCooler'])),
+      obsMotorBody: num(pick(r,['obsMotorBody'])),
+
       obs: [pick(r,['description']), pick(r,['fadDescription']), pick(r,['pumpDescription'])]
              .filter(function(t){ return t; }).join(' ') };
   }).filter(function(n){ return n.tag; });   /* Excel loves trailing blank rows */
@@ -3045,6 +3206,11 @@ function importACmp(wb){
   S.compressor = keep.concat(incoming);
   S.enabled.compressor = true;
   log.push(incoming.length + ' compressor' + (incoming.length === 1 ? '' : 's') + ' from A-CMP');
+
+  var drift = S.compressor.map(compressorCalc).filter(function(d){ return d.drift; }).length;
+  if (drift) log.push(drift + ' machine(s) where the recomputed figure differs from the app\u2019s by more than 3 %');
+  var made = syncCompressorLedger();
+  if (made) log.push(made + ' recommendation(s) written to the ledger');
   return log;
 }
 
@@ -3212,8 +3378,23 @@ var SHEETS = [
     cols:[['month','Month','s'],['qty','Units kWh','n'],['cost','Cost Rs','n'],['prod','Production','n']] },
   { name:'Baseline Thermal', path:'baseline.thermal', label:'Thermal baseline',
     cols:[['month','Month','s'],['qty','Quantity','n'],['cost','Cost Rs','n'],['prod','Production','n']] },
-  { name:'Baseline Water', path:'baseline.water', label:'Water baseline',
-    cols:[['month','Month','s'],['qty','Quantity m3','n'],['cost','Cost Rs','n'],['prod','Production','n']] },
+  /* The baseline model keeps water as a month-key map, and
+     syncBaselineLegacy mirrors it to a flat array for everything that reads
+     rows. The spec pointed at the map: buildModuleWorkbook called forEach on
+     an object and threw, which broke BOTH the blank template and "Export
+     this report as a workbook" - the crash was in the shared builder, so the
+     button that never touches water died too. `after` puts an imported sheet
+     back into the map, or the next syncBaselineLegacy would erase it. */
+  { name:'Baseline Water', path:'baseline.waterRows', label:'Water baseline',
+    cols:[['month','Month','s'],['m3','Quantity m3','n']],
+    after:function(rows){
+      var b = S.baseline, byLabel = {};
+      (b.months || []).forEach(function(p){ byLabel[monthLabelOf(p.y,p.m)] = monthKey(p.y,p.m); });
+      rows.forEach(function(r){
+        var k = byLabel[String(r.month).trim()];
+        if (k && r.m3 !== null && r.m3 !== '') b.water[k] = r.m3;
+      });
+    } },
 
   { name:'PCC Loads', path:'dist.pcc', label:'PCC panel loads',
     cols:[['name','Name of machine','s'],['v','Voltage','n'],['i','Current','n'],['kw','kW','n'],
@@ -3319,6 +3500,7 @@ function importModules(wb){
     });
     var t = atPath(sp.path);
     t.parent[t.key] = out;
+    if (sp.after) sp.after(out);
     var flag = { 'boiler.spec':'boiler', 'tfh.spec':'tfh', 'chiller.readings':'chiller',
                  'solar.rows':'solar', 'coolingTower':'coolingTower', 'compressor':'compressor',
                  'pumps':'pumps', 'lux':'lux', 'earth':'earth', 'sop':'sop' }[sp.path];
@@ -4542,10 +4724,39 @@ function buildUtilities(B){
           { v:fix(d.actualSEC,3), tone:(d.deviation !== null && d.deviation > 10 ? 'bad' : 'ok') }],
         ['Design air gen, CFM/kW', fix(d.designAirGen,2), 'Actual air gen, CFM/kW', fix(d.actualAirGen,2)]
       ], { colw:['28%','20%','30%','22%'] }));
+      /* Thermography: A-CMP records these four points against an image
+         number, and they are what an overhaul recommendation is argued
+         from. Printed only where the engineer actually took them. */
+      var th = [['Compressor discharge', k.obsCompDischarge], ['Oil cooler', k.obsOilCooler],
+                ['After cooler', k.obsAfterCooler], ['Motor body', k.obsMotorBody]]
+               .filter(function(r){ return num(r[1]) !== null; });
+      if (th.length) B.push(tblBlock(
+        ['Thermography' + (k.obsThermalImageNo ? ' \u2014 image ' + k.obsThermalImageNo : '')].concat(
+          th.map(function(r){ return r[0]; })),
+        [['Temperature, \u00b0C'].concat(th.map(function(r){ return fix(num(r[1]),1); }))],
+        { size:8 }));
+
       if (d.deviation !== null) B.push(blk(bNote(
         'Actual specific energy consumption is ' + fix(Math.abs(d.deviation),1) + ' % ' +
         (d.deviation > 0 ? 'above' : 'below') + ' design, at ' + fix(d.actualSEC,3) +
         ' against ' + fix(d.designSEC,3) + ' kW/CFM.', d.deviation > 10 ? 'bad' : 'ok')));
+
+      /* A machine idling most of its life is a separate finding from one
+         running inefficiently, and is fixed differently. */
+      if (d.loadPct !== null && d.loadPct < 60) B.push(blk(bNote(
+        'The machine is loaded only ' + fix(d.loadPct,1) + ' % of its running hours' +
+        (d.unloadKw !== null ? ', drawing ' + fix(d.unloadKw,1) + ' kW unloaded for the rest' : '') +
+        '. Sequencing or a variable speed drive is worth more here than an overhaul.', 'bad')));
+
+      /* Said out loud rather than resolved silently: the report prints the
+         app's figure, and where the quick recomputation disagrees by more
+         than 3 % somebody should know which test to trust. */
+      if (d.drift) B.push(blk(bNote(
+        'A-CMP measured ' + fix(d.appCFM,1) + ' CFM on the ' +
+        (d.testType === 'Pump-up' ? 'pump-up' : 'free air delivery') + ' test; recomputing from the ' +
+        'raw readings gives ' + fix(d.ownCFM,1) + ' CFM. The app\u2019s figure is printed above \u2014 ' +
+        'check the test record before quoting either.', 'watch')));
+
       if (k.obs) B.push(blk(bP(k.obs)));
     });
     ledgerFor(B, 'compressor');
@@ -7065,6 +7276,14 @@ function foxReporter(wb){
 }
 var g2 = function(o){ return function(){ for (var i = 0; i < arguments.length; i++){ var v = o[normKey(arguments[i])]; if (v !== undefined && v !== '') return v; } return null; }; };
 function phaseAvg(a, b, c){ var xs = [num(a), num(b), num(c)].filter(function(x){ return x !== null; }); return xs.length ? xs.reduce(function(p, q){ return p + q; }, 0) / xs.length : null; }
+/* Distortion is NOT averaged across the phases. IEEE-519 is a limit on a
+   phase, and the panel tables colour a cell red by comparing this one
+   figure against it. Averaging 9.0 / 4.0 / 4.0 gives 5.7 %, which prints
+   clean while one phase sits 12 % over the limit - the report would say the
+   plant complies when it does not. The worst phase is what the limit is
+   about, so it is what the report shows and judges. The three phases are
+   kept alongside, and panelTable still prints them. */
+function phaseWorst(a, b, c){ var xs = [num(a), num(b), num(c)].filter(function(x){ return x !== null; }); return xs.length ? Math.max.apply(null, xs) : null; }
 function foxPanel(o, kind){
   var g = g2(o);
   var v = phaseAvg(g('v1'), g('v2'), g('v3')), i = phaseAvg(g('i1'), g('i2'), g('i3'));
@@ -7073,9 +7292,9 @@ function foxPanel(o, kind){
     kind:kind, name:String(g('name','pccname','mccname') || ''), main:String(g('plantmaininput','zoneplantinput') || ''),
     pcc:String(g('parentpccpanel') || ''), pqName:String(g('pqname') || ''), recId:String(g('recordingid') || ''),
     v1:num(g('v1')), v2:num(g('v2')), v3:num(g('v3')), v:v,
-    uthd1:num(g('uthd1')), uthd2:num(g('uthd2')), uthd3:num(g('uthd3')), vthd:phaseAvg(g('uthd1'), g('uthd2'), g('uthd3')),
+    uthd1:num(g('uthd1')), uthd2:num(g('uthd2')), uthd3:num(g('uthd3')), vthd:phaseWorst(g('uthd1'), g('uthd2'), g('uthd3')),
     i1:num(g('i1')), i2:num(g('i2')), i3:num(g('i3')), i:i,
-    ithd1:num(g('ithd1')), ithd2:num(g('ithd2')), ithd3:num(g('ithd3')), ithd:phaseAvg(g('ithd1'), g('ithd2'), g('ithd3')),
+    ithd1:num(g('ithd1')), ithd2:num(g('ithd2')), ithd3:num(g('ithd3')), ithd:phaseWorst(g('ithd1'), g('ithd2'), g('ithd3')),
     pf:pf, kvarD:num(g('kvard')), kvarQ:num(g('kvarq')), kvar:num(g('kvarq')) !== null ? num(g('kvarq')) : num(g('kvard')),
     leadLag:String(g('kvarleadlag','leadlag') || ''), kw:kw, kva:(kw !== null && pf) ? kw / pf : null,
     desc:String(g('description') || ''), by:String(g('recordedby') || ''), date:String(g('date','time') || '')
@@ -7096,7 +7315,7 @@ function importFox(wb, fileName){
     return { method:method, name:String(g('machinetag') || ''), main:String(g('zoneplantinput') || ''), pcc:String(g('parentpccpanel') || ''),
       mcc:String(g('mccpanelname') || ''), rated:rated, hp:num(g('ratedhp')), starter:String(g('startertype') || ''), freq:num(g('vfdfrequency')),
       v:v, i:i, kw:kw, kva:num(g('kva')), kvar:num(g('kvar','kvarq')), pf:num(g('powerfactor','pf')),
-      vthd:phaseAvg(g('uthd1'), g('uthd2'), g('uthd3')), ithd:phaseAvg(g('ithd1'), g('ithd2'), g('ithd3')),
+      vthd:phaseWorst(g('uthd1'), g('uthd2'), g('uthd3')), ithd:phaseWorst(g('ithd1'), g('ithd2'), g('ithd3')),
       loadFactor:num(g('loadfactor')), pqName:String(g('pqname') || ''), recId:String(g('recordingid') || ''),
       desc:String(g('description') || ''), by:String(g('recordedby') || ''), date:String(g('date') || '') };
   };
@@ -7317,7 +7536,7 @@ function buildDistSection(B){
         { v:fix(num(r.vthd)), tone:(num(r.vthd) > 5 ? 'bad' : null) }, { v:fix(num(r.ithd)), tone:(num(r.ithd) > 8 ? 'bad' : null) }]
         .concat(anyScore ? [sc === null ? '\u2014' : { v:sc + ' %', tone:(sc >= 80 ? 'ok' : sc >= 55 ? 'watch' : 'bad') }] : []); }),
       { size:8, colw: anyScore ? ['18%','12%','8%','8%','8%','8%','7%','10%','10%','11%'] : ['20%','14%','9%','9%','9%','9%','8%','11%','11%'] }));
-    B.push(blk(bNote('Red cells exceed the IEEE-519:2022 limits of 5 % voltage THD and 8 % current THD.' + (anyScore ? ' Compliance is the PQ analyser\u2019s standards score for the panel\u2019s recording.' : ''))));
+    B.push(blk(bNote('THD is the worst of the three phases, which is what IEEE-519 limits. Red cells exceed the IEEE-519:2022 limits of 5 % voltage THD and 8 % current THD.' + (anyScore ? ' Compliance is the PQ analyser\u2019s standards score for the panel\u2019s recording.' : ''))));
     B.push(blk(bChart(chartGrouped(d.pcc.map(function(r){ return r.name; }),
       [{ name:'kW', color:PH[0], values:d.pcc.map(function(r){ return num(r.kw) || 0; }) }, { name:'kVA', color:PH[1], values:d.pcc.map(function(r){ return num(r.kva) || 0; }) }],
       'PCC panel loading', 'kW / kVA'), 'Active and apparent power at each PCC panel')));
@@ -8328,6 +8547,221 @@ function txCard(w, kind){
   c.appendChild(bar);
   w.appendChild(c);
 }
+
+
+/* ===================================================================
+   DATA SOURCES
+
+   Each field app owns its own domain: FOX the panels and motors,
+   Thermo-X the boiler and thermopack, JET-Eff the jets, A-CMP the
+   compressors. They measure, they do the physics, they keep their own
+   records. PostMan collects what they produced, prices it against one
+   cost register, and writes the report.
+
+   Two ways in, and deliberately only ONE reader behind them:
+
+     - the workbook, downloaded from the app and dropped here;
+     - the same workbook bytes handed straight over by the app, with no
+       download, when PostMan opened it.
+
+   The second is the interesting one, and the reason it is safe is that
+   it is not a second format. The app sends the identical file it would
+   have written to disk, base64'd through postMessage; PostMan decodes it
+   and runs importAny on it exactly as if the user had dropped it. No
+   second parser, no second set of field names, nothing new to keep in
+   step. A transport, not a protocol.
+   =================================================================== */
+
+var APPS = [
+  { id:'fox',    name:'FOX',
+    url:'https://fox-kisem.vercel.app/',
+    covers:['dist','tr'],
+    what:'Panels, motor loads, APFC and nameplates',
+    note:'Machine-wise acquisition with nameplate OCR.' },
+  { id:'thermo', name:'Thermo-X',
+    url:'https://thermo-x-i7tl.vercel.app/',
+    covers:['boiler','tfh'],
+    what:'Boiler and thermic fluid heater',
+    note:'Direct and indirect efficiency, flue gas analysis.' },
+  { id:'jet',    name:'JET-Eff',
+    url:'https://jet-eff.vercel.app/',
+    covers:['jets'],
+    what:'Jet machines',
+    note:'Surface loss, pump efficiency, trap performance.' },
+  { id:'acmp',   name:'A-CMP',
+    url:'https://a-cmp.vercel.app/',
+    covers:['compressor'],
+    what:'Air compressors',
+    note:'FAD or pump-up test, specific energy consumption.' }
+];
+
+function appById(id){
+  for (var i = 0; i < APPS.length; i++) if (APPS[i].id === id) return APPS[i];
+  return null;
+}
+/* Thermo-X fills the boiler and TFH chapters through p20_thermox.js.
+   URLs live in state so a redeploy that moves an app is a field edit,
+   not a code change and a rebuild. */
+function appUrl(a){
+  var u = (S.appUrls && S.appUrls[a.id]) || a.url;
+  return String(u || '').trim();
+}
+function appOrigin(a){
+  try { return new URL(appUrl(a)).origin; } catch (e){ return null; }
+}
+
+/* Which modules an app fills, and whether anything has arrived yet. */
+function moduleFilled(id){
+  switch (id){
+    case 'jets':       return S.jets.length;
+    case 'compressor': return S.compressor.length;
+    case 'boiler':     return (S.boiler.spec || []).length || num(S.boiler.direct.steam) !== null;
+    case 'tfh':        return (S.tfh.spec || []).length;
+    case 'dist':       return S.dist.pcc.length + S.dist.motors.length + S.dist.apfc.length;
+    case 'tr':         return S.tr.panels.length || num(S.tr.capacity) !== null;
+    default:           return 0;
+  }
+}
+
+/* ---- the handoff ---------------------------------------------------
+   PostMan opens the app with the plant already named, so nobody retypes
+   it and the company guard has something consistent to check against.
+   The app sends the workbook back through postMessage.
+
+   Messages are accepted ONLY from an origin that is one of the app URLs
+   configured here. A page that can post into this window can otherwise
+   put anything it likes into a report somebody signs. */
+var HANDOFF = { open:null, app:null, status:null };
+
+function openApp(a, statusFn){
+  var base = appUrl(a);
+  if (!base){ alert('No web address set for ' + a.name + ' yet.'); return; }
+  var q = [
+    'from=postman',
+    'origin=' + encodeURIComponent(location.origin),
+    'company=' + encodeURIComponent(S.company.name || ''),
+    'fy=' + encodeURIComponent(S.meta.financialYear || '')
+  ].join('&');
+  var url = base + (base.indexOf('?') >= 0 ? '&' : '?') + q;
+
+  /* A file:// page has origin "null", so the app cannot post back to it
+     and this degrades to "open the app, download, drop the file". */
+  var canReceive = location.protocol === 'http:' || location.protocol === 'https:';
+  var win = window.open(url, 'kisem-' + a.id);
+  if (!win){
+    alert('The browser blocked the pop-up. Allow pop-ups for this page, or open ' + base +
+          ' yourself and drop the exported file here.');
+    return;
+  }
+  HANDOFF.open = win; HANDOFF.app = a; HANDOFF.status = statusFn || null;
+  if (statusFn) statusFn(canReceive
+    ? 'Waiting for ' + a.name + ' to send its data back\u2026 you can also just export and drop the file here.'
+    : 'Opened ' + a.name + '. This copy of PostMan is a local file, so the app cannot hand data back \u2014 ' +
+      'export from the app and drop the file here.');
+}
+
+function handoffOrigins(){
+  var out = {};
+  APPS.forEach(function(a){ var o = appOrigin(a); if (o) out[o] = a; });
+  return out;
+}
+
+function onHandoffMessage(ev){
+  var allowed = handoffOrigins();
+  var app = allowed[ev.origin];
+  if (!app) return;                       /* not one of ours - ignore silently */
+  var d = ev.data;
+  if (!d || d.kind !== 'kisem-data' || !d.workbook) return;
+
+  var say = HANDOFF.status || function(){};
+  try {
+    var bin = atob(String(d.workbook)), arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    var wb = XLSX.read(arr, { type:'array' });
+    var log = importAny(wb);              /* the one reader, same as a dropped file */
+    save(); renderAll();
+    say('');
+    alert(app.name + ' sent its data:\n\n\u2022 ' + log.join('\n\u2022 '));
+    if (HANDOFF.open && !HANDOFF.open.closed) { try { HANDOFF.open.close(); } catch (e) {} }
+  } catch (err){
+    say('');
+    alert('Could not read what ' + app.name + ' sent.\n\n' + err.message +
+          '\n\nExport the workbook from the app and drop it here instead.');
+  }
+}
+window.addEventListener('message', onHandoffMessage);
+
+/* ---- the screen ----------------------------------------------------- */
+FORMS.sources = function(w){
+  var c = card('Where the data comes from',
+    'Each app owns its own measurements and its own formulas. PostMan collects what they produced, ' +
+    'prices it against one cost register and writes the report \u2014 it does not re-derive the physics. ' +
+    'Open an app with the plant already named, or drop its exported workbook here; both go through the ' +
+    'same reader and the same company check.');
+  w.appendChild(c);
+
+  var status = el('div','font-size:12px;color:var(--ink-3);min-height:18px;margin:10px 0 0;');
+
+  APPS.forEach(function(a){
+    var mods = a.covers.map(function(m){ var s = sectionById(m); return s ? s.title : m; });
+    var filled = a.covers.filter(function(m){ return moduleFilled(m); });
+    var cc = card(a.name + ' \u2014 ' + a.what, a.note);
+
+    var state = el('p','', filled.length
+      ? 'Loaded: ' + filled.map(function(m){ var s = sectionById(m); return s ? s.title : m; }).join(', ')
+      : 'Nothing imported yet. Fills: ' + mods.join(', ') + '.');
+    state.className = 'callout ' + (filled.length ? 'good' : 'info');
+    cc.appendChild(state);
+
+    var bar = el('div','display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center;');
+    bar.appendChild(btn('Open ' + a.name, function(){
+      openApp(a, function(t){ status.textContent = t; });
+    }, 'primary'));
+
+    var f = el('input'); f.type='file'; f.accept='.xlsx,.xls,.csv';
+    f.addEventListener('change', function(){
+      var file = f.files && f.files[0]; if (!file) return;
+      readWorkbook(file).then(function(wb){
+        var log; 
+        try { log = importAny(wb); }
+        catch (e){ f.value=''; alert(e.message); return; }
+        f.value=''; save(); renderAll();
+        alert('Imported:\n\n\u2022 ' + log.join('\n\u2022 '));
+      }).catch(function(e){ alert(e.message); });
+    });
+    cc.appendChild(bar);
+    cc.appendChild(labelled('Or drop its exported workbook', f));
+    cc.appendChild(fText(S.appUrls, a.id, 'Web address', appUrl(a),
+      'Change this if the app moves to a different address.'));
+    w.appendChild(cc);
+  });
+
+  var noApp = SECTIONS.filter(function(s){
+    if (!s.opt && s.id !== 'bills') return false;
+    var owned = false;
+    APPS.forEach(function(a){ if (a.covers.indexOf(s.id) >= 0) owned = true; });
+    return !owned;
+  }).map(function(s){ return s.title; });
+
+  var c2 = card('Everything else \u2014 the module workbook',
+    'These modules have no app of their own yet, so they are filled in the workbook you take to site, ' +
+    'or typed straight into their section here. One sheet per module, a Read me tab explaining every ' +
+    'column, and only the sheets you filled are read back.');
+  c2.appendChild(el('p','font-size:12px;color:var(--ink-3);margin:0 0 10px',
+    noApp.join(' \u00B7 ')));
+  var bar2 = el('div','display:flex;gap:8px;flex-wrap:wrap;');
+  bar2.appendChild(btn('Download blank template (XLSX)', function(){
+    offerWorkbook('PostMan-module-template.xlsx', buildModuleWorkbook(false));
+  }));
+  bar2.appendChild(btn('Export this report as a workbook', function(){
+    offerWorkbook(reportFilename(S.meta.financialYear, S.meta.serial, S.company.name, S.meta.reportDate) + '.xlsx',
+      buildModuleWorkbook(true));
+  }));
+  c2.appendChild(bar2);
+  w.appendChild(c2);
+
+  w.appendChild(status);
+};
 
 
 /* ===================================================================

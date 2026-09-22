@@ -126,10 +126,39 @@ function buildUtilities(B){
           { v:fix(d.actualSEC,3), tone:(d.deviation !== null && d.deviation > 10 ? 'bad' : 'ok') }],
         ['Design air gen, CFM/kW', fix(d.designAirGen,2), 'Actual air gen, CFM/kW', fix(d.actualAirGen,2)]
       ], { colw:['28%','20%','30%','22%'] }));
+      /* Thermography: A-CMP records these four points against an image
+         number, and they are what an overhaul recommendation is argued
+         from. Printed only where the engineer actually took them. */
+      var th = [['Compressor discharge', k.obsCompDischarge], ['Oil cooler', k.obsOilCooler],
+                ['After cooler', k.obsAfterCooler], ['Motor body', k.obsMotorBody]]
+               .filter(function(r){ return num(r[1]) !== null; });
+      if (th.length) B.push(tblBlock(
+        ['Thermography' + (k.obsThermalImageNo ? ' \u2014 image ' + k.obsThermalImageNo : '')].concat(
+          th.map(function(r){ return r[0]; })),
+        [['Temperature, \u00b0C'].concat(th.map(function(r){ return fix(num(r[1]),1); }))],
+        { size:8 }));
+
       if (d.deviation !== null) B.push(blk(bNote(
         'Actual specific energy consumption is ' + fix(Math.abs(d.deviation),1) + ' % ' +
         (d.deviation > 0 ? 'above' : 'below') + ' design, at ' + fix(d.actualSEC,3) +
         ' against ' + fix(d.designSEC,3) + ' kW/CFM.', d.deviation > 10 ? 'bad' : 'ok')));
+
+      /* A machine idling most of its life is a separate finding from one
+         running inefficiently, and is fixed differently. */
+      if (d.loadPct !== null && d.loadPct < 60) B.push(blk(bNote(
+        'The machine is loaded only ' + fix(d.loadPct,1) + ' % of its running hours' +
+        (d.unloadKw !== null ? ', drawing ' + fix(d.unloadKw,1) + ' kW unloaded for the rest' : '') +
+        '. Sequencing or a variable speed drive is worth more here than an overhaul.', 'bad')));
+
+      /* Said out loud rather than resolved silently: the report prints the
+         app's figure, and where the quick recomputation disagrees by more
+         than 3 % somebody should know which test to trust. */
+      if (d.drift) B.push(blk(bNote(
+        'A-CMP measured ' + fix(d.appCFM,1) + ' CFM on the ' +
+        (d.testType === 'Pump-up' ? 'pump-up' : 'free air delivery') + ' test; recomputing from the ' +
+        'raw readings gives ' + fix(d.ownCFM,1) + ' CFM. The app\u2019s figure is printed above \u2014 ' +
+        'check the test record before quoting either.', 'watch')));
+
       if (k.obs) B.push(blk(bP(k.obs)));
     });
     ledgerFor(B, 'compressor');

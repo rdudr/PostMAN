@@ -253,7 +253,7 @@ function completion(sec){
     case 'ledger': return S.ledger.length ? (rollUp(S.ledger).draft ? 'part' : 'on') : '';
     case 'production': return S.production.intro ? 'on' : '';
     case 'baseline': return S.baseline.elec.some(function(r){ return num(r.kwh); }) ? 'on' : '';
-    case 'water': return S.baseline.water.length ? 'on' : '';
+    case 'water': return (S.baseline.waterRows || []).length ? 'on' : '';
     case 'bills': return S.bills.length ? 'on' : '';
     /* Amber until every bill has been looked at by a person. */
     case 'verify': return S.bills.length ? (billsProgress().left ? 'part' : 'on') : '';

@@ -42,6 +42,7 @@ var SECTIONS = [
 
   { id:'custom',      group:'Closing', title:'Your own pages',   always:true },
   { id:'instruments', group:'Closing', title:'Instruments used', always:true },
+  { id:'sources',     group:'Closing', title:'Data sources',       always:true, tool:true },
   { id:'imports',     group:'Closing', title:'Import field data', always:true, tool:true },
   { id:'costs',       group:'Closing', title:'Cost register',     always:true, tool:true }
 ];

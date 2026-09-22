@@ -168,6 +168,7 @@ function blankState(){
     team:{ plant:[], iea:defaultIeaTeam() },
     production:{ intro:'', products:[], website:'', phone:'', mail:'', factoryAddress:'', flowNote:'' },
     baseline:blankBaseline(),
+    appUrls:{},            /* where each field app lives; see p21_sources.js */
     bills:[],
     billCursor:0,
     billNotes:{ pfNote:'', cdNote:'', todNote:'' },

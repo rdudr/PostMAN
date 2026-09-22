@@ -1,14 +1,15 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
+import { APP, XLSX_JS, fx } from './_paths.mjs';
 const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium' });
 const pg = await b.newPage({ viewport:{width:1500,height:1000} });
 const errs=[]; pg.on('pageerror',e=>errs.push(e.message));
 pg.on('console',m=>{ if(m.type()==='error' && !/ERR_TUNNEL|ERR_NAME|fonts\.g/.test(m.text())) errs.push('console: '+m.text()); });
-await pg.goto('file:///home/claude/pm/app.html');
-await pg.addScriptTag({ path:'node_modules/xlsx/dist/xlsx.full.min.js' });
+await pg.goto(APP);
+await pg.addScriptTag({ path:XLSX_JS });
 await pg.waitForTimeout(600);
 const s = await pg.$('text=Load sample'); if (s){ await s.click(); await pg.waitForTimeout(400); }
-const buf = fs.readFileSync('t/JetData_ShreeMahadev.xlsx').toString('base64');
+const buf = fs.readFileSync(fx('JetData_ShreeMahadev.xlsx')).toString('base64');
 await pg.evaluate(b64=>{const bin=atob(b64),a=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);
   importAny(XLSX.read(a,{type:'array'})); Object.keys(S.enabled).forEach(k=>S.enabled[k]=true); save(); renderAll();}, buf);
 await pg.waitForTimeout(700);

@@ -223,6 +223,14 @@ function foxReporter(wb){
 }
 var g2 = function(o){ return function(){ for (var i = 0; i < arguments.length; i++){ var v = o[normKey(arguments[i])]; if (v !== undefined && v !== '') return v; } return null; }; };
 function phaseAvg(a, b, c){ var xs = [num(a), num(b), num(c)].filter(function(x){ return x !== null; }); return xs.length ? xs.reduce(function(p, q){ return p + q; }, 0) / xs.length : null; }
+/* Distortion is NOT averaged across the phases. IEEE-519 is a limit on a
+   phase, and the panel tables colour a cell red by comparing this one
+   figure against it. Averaging 9.0 / 4.0 / 4.0 gives 5.7 %, which prints
+   clean while one phase sits 12 % over the limit - the report would say the
+   plant complies when it does not. The worst phase is what the limit is
+   about, so it is what the report shows and judges. The three phases are
+   kept alongside, and panelTable still prints them. */
+function phaseWorst(a, b, c){ var xs = [num(a), num(b), num(c)].filter(function(x){ return x !== null; }); return xs.length ? Math.max.apply(null, xs) : null; }
 function foxPanel(o, kind){
   var g = g2(o);
   var v = phaseAvg(g('v1'), g('v2'), g('v3')), i = phaseAvg(g('i1'), g('i2'), g('i3'));
@@ -231,9 +239,9 @@ function foxPanel(o, kind){
     kind:kind, name:String(g('name','pccname','mccname') || ''), main:String(g('plantmaininput','zoneplantinput') || ''),
     pcc:String(g('parentpccpanel') || ''), pqName:String(g('pqname') || ''), recId:String(g('recordingid') || ''),
     v1:num(g('v1')), v2:num(g('v2')), v3:num(g('v3')), v:v,
-    uthd1:num(g('uthd1')), uthd2:num(g('uthd2')), uthd3:num(g('uthd3')), vthd:phaseAvg(g('uthd1'), g('uthd2'), g('uthd3')),
+    uthd1:num(g('uthd1')), uthd2:num(g('uthd2')), uthd3:num(g('uthd3')), vthd:phaseWorst(g('uthd1'), g('uthd2'), g('uthd3')),
     i1:num(g('i1')), i2:num(g('i2')), i3:num(g('i3')), i:i,
-    ithd1:num(g('ithd1')), ithd2:num(g('ithd2')), ithd3:num(g('ithd3')), ithd:phaseAvg(g('ithd1'), g('ithd2'), g('ithd3')),
+    ithd1:num(g('ithd1')), ithd2:num(g('ithd2')), ithd3:num(g('ithd3')), ithd:phaseWorst(g('ithd1'), g('ithd2'), g('ithd3')),
     pf:pf, kvarD:num(g('kvard')), kvarQ:num(g('kvarq')), kvar:num(g('kvarq')) !== null ? num(g('kvarq')) : num(g('kvard')),
     leadLag:String(g('kvarleadlag','leadlag') || ''), kw:kw, kva:(kw !== null && pf) ? kw / pf : null,
     desc:String(g('description') || ''), by:String(g('recordedby') || ''), date:String(g('date','time') || '')
@@ -254,7 +262,7 @@ function importFox(wb, fileName){
     return { method:method, name:String(g('machinetag') || ''), main:String(g('zoneplantinput') || ''), pcc:String(g('parentpccpanel') || ''),
       mcc:String(g('mccpanelname') || ''), rated:rated, hp:num(g('ratedhp')), starter:String(g('startertype') || ''), freq:num(g('vfdfrequency')),
       v:v, i:i, kw:kw, kva:num(g('kva')), kvar:num(g('kvar','kvarq')), pf:num(g('powerfactor','pf')),
-      vthd:phaseAvg(g('uthd1'), g('uthd2'), g('uthd3')), ithd:phaseAvg(g('ithd1'), g('ithd2'), g('ithd3')),
+      vthd:phaseWorst(g('uthd1'), g('uthd2'), g('uthd3')), ithd:phaseWorst(g('ithd1'), g('ithd2'), g('ithd3')),
       loadFactor:num(g('loadfactor')), pqName:String(g('pqname') || ''), recId:String(g('recordingid') || ''),
       desc:String(g('description') || ''), by:String(g('recordedby') || ''), date:String(g('date') || '') };
   };
@@ -475,7 +483,7 @@ function buildDistSection(B){
         { v:fix(num(r.vthd)), tone:(num(r.vthd) > 5 ? 'bad' : null) }, { v:fix(num(r.ithd)), tone:(num(r.ithd) > 8 ? 'bad' : null) }]
         .concat(anyScore ? [sc === null ? '—' : { v:sc + ' %', tone:(sc >= 80 ? 'ok' : sc >= 55 ? 'watch' : 'bad') }] : []); }),
       { size:8, colw: anyScore ? ['18%','12%','8%','8%','8%','8%','7%','10%','10%','11%'] : ['20%','14%','9%','9%','9%','9%','8%','11%','11%'] }));
-    B.push(blk(bNote('Red cells exceed the IEEE-519:2022 limits of 5 % voltage THD and 8 % current THD.' + (anyScore ? ' Compliance is the PQ analyser’s standards score for the panel’s recording.' : ''))));
+    B.push(blk(bNote('THD is the worst of the three phases, which is what IEEE-519 limits. Red cells exceed the IEEE-519:2022 limits of 5 % voltage THD and 8 % current THD.' + (anyScore ? ' Compliance is the PQ analyser’s standards score for the panel’s recording.' : ''))));
     B.push(blk(bChart(chartGrouped(d.pcc.map(function(r){ return r.name; }),
       [{ name:'kW', color:PH[0], values:d.pcc.map(function(r){ return num(r.kw) || 0; }) }, { name:'kVA', color:PH[1], values:d.pcc.map(function(r){ return num(r.kva) || 0; }) }],
       'PCC panel loading', 'kW / kVA'), 'Active and apparent power at each PCC panel')));

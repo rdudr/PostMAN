@@ -171,30 +171,76 @@ FORMS.compressor = function(w){
     w.appendChild(b);
   });
 };
+/* The compressor's arithmetic, with A-CMP's own answers preferred.
+
+   A-CMP does two things this quick formula does not: its FAD test averages
+   an anemometer traverse across the suction area rather than taking one
+   reading, and its pump-up test applies the temperature correction
+   273/(273+T), which moves the answer several per cent in a hot compressor
+   room. Recomputing and printing that instead would put a different number
+   in the report from the one on the engineer's screen, with nothing to say
+   which is right.
+
+   So the app's figure wins where it exists, the recomputation fills a gap
+   and cross-checks, and where the two differ by more than 3 % - wider than
+   rounding, narrower than a real formula change - the report says so. */
 function compressorCalc(k){
   var ratedCFM = toCFM(k.ratedCap, k.capUnit);
   var ratedKw = num(k.ratedKw);
-  var designSEC = (ratedKw && ratedCFM) ? ratedKw / ratedCFM : null;
-  var designAirGen = (ratedKw && ratedCFM) ? ratedCFM / ratedKw : null;
-  var actualCFM = null;
-  if (k.testType === 'FAD'){
+
+  var designSEC = num(k.designedSec);
+  if (designSEC === null) designSEC = (ratedKw && ratedCFM) ? ratedKw / ratedCFM : null;
+  var designAirGen = num(k.designedAirGen);
+  if (designAirGen === null) designAirGen = (ratedKw && ratedCFM) ? ratedCFM / ratedKw : null;
+
+  var isPump = k.testType === 'Pump-up';
+  var appCFM = isPump ? num(k.pumpActualFadCfm) : num(k.fadAirDeliveryCfm);
+  var appSEC = num(k.fadActualSec);
+  var appGen = num(k.fadActualAirGen);
+
+  var ownCFM = null;
+  if (!isPump){
     var a = num(k.suctionArea), v = num(k.avgVelocity);
-    if (a !== null && v !== null) actualCFM = a * v * 2118.88;   /* m³/s -> CFM */
+    if (a !== null && v !== null) ownCFM = a * v * 2118.88;        /* m3/s -> CFM */
   } else {
     var p1 = num(k.pumpP1), p2 = num(k.pumpP2), t = num(k.pumpTime), vol = num(k.tankVol);
-    if (p1 !== null && p2 !== null && t && vol)
-      actualCFM = ((p2 - p1) * vol * 60 / (1.01325 * t)) * 35.3147;
+    if (p1 !== null && p2 !== null && t && vol){
+      ownCFM = ((p2 - p1) * vol * 60 / (1.01325 * t)) * 35.3147;
+      var tf = num(k.pumpTempFactor);
+      if (tf === null && num(k.pumpAirTemp) !== null) tf = 273 / (273 + num(k.pumpAirTemp));
+      if (tf) ownCFM *= tf;
+    }
   }
+
+  var actualCFM = appCFM !== null ? appCFM : ownCFM;
+  var drift = false;
+  if (appCFM !== null && ownCFM !== null && appCFM > 0 &&
+      Math.abs(appCFM - ownCFM) / appCFM > 0.03) drift = true;
+
   var mkw = num(k.measuredKw);
-  var actualSEC = (mkw && actualCFM) ? mkw / actualCFM : null;
-  var actualAirGen = (mkw && actualCFM) ? actualCFM / mkw : null;
+  if (mkw === null) mkw = num(k.genLoadKw);
+
+  var actualSEC = appSEC !== null ? appSEC : ((mkw && actualCFM) ? mkw / actualCFM : null);
+  var actualAirGen = appGen !== null ? appGen : ((mkw && actualCFM) ? actualCFM / mkw : null);
   var deviation = (designSEC && actualSEC) ? ((actualSEC - designSEC) / designSEC) * 100 : null;
-  var lh = num(k.loadHrs), th = num(k.totalHrs);
-  var loadPct = (lh !== null && th) ? (lh/th)*100 : null;
-  var annualKwh = (mkw && num(k.hoursPerDay)) ? mkw * num(k.hoursPerDay) * (num(S.costs.days) || 350) : null;
+
+  var lh = num(k.loadHrs), uh = num(k.unloadHrs), th = num(k.totalHrs);
+  if (th === null && lh !== null && uh !== null) th = lh + uh;
+  var loadPct = (lh !== null && th) ? (lh / th) * 100 : null;
+
+  var unloadKw = num(k.genUnloadKw);
+  var days = num(k.annualOperatingDays) || num(S.costs.days) || 350;
+  var hrs = num(k.hoursPerDay); if (hrs === null) hrs = 24;
+  var idleKwh = (unloadKw !== null && loadPct !== null)
+    ? unloadKw * hrs * (1 - loadPct / 100) * days : null;
+  var annualKwh = (mkw && hrs) ? mkw * hrs * days : null;
+
   return { ratedCFM:ratedCFM, designSEC:designSEC, designAirGen:designAirGen,
            actualCFM:actualCFM, actualSEC:actualSEC, actualAirGen:actualAirGen,
-           deviation:deviation, loadPct:loadPct, annualKwh:annualKwh };
+           appCFM:appCFM, ownCFM:ownCFM, drift:drift, testType:isPump ? 'Pump-up' : 'FAD',
+           measuredKw:mkw, unloadKw:unloadKw,
+           deviation:deviation, loadPct:loadPct, idleKwh:idleKwh, annualKwh:annualKwh,
+           days:days, hrs:hrs };
 }
 
 FORMS.coolingTower = function(w){

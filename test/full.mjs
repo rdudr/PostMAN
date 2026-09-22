@@ -1,5 +1,6 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
+import { APP, PDFJS, PDFJS_W, XLSX_JS, fx, out } from './_paths.mjs';
 
 const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium' });
 const pg = await b.newPage({ viewport:{width:1600,height:1050}, deviceScaleFactor:2 });
@@ -10,11 +11,11 @@ const step = (n,s)=>console.log(`\n[${n}] ${s}\n${'-'.repeat(62)}`);
 let FAIL = 0;
 const check = (label, ok, detail='') => { console.log(`  ${ok?'PASS':'FAIL'}  ${label}${detail?'  '+detail:''}`); if(!ok) FAIL++; };
 
-await pg.goto('file:///home/claude/pm/app.html');
+await pg.goto(APP);
 // cdnjs is unreachable from this sandbox — inject the same pinned builds locally
-await pg.addScriptTag({ path:'node_modules/xlsx/dist/xlsx.full.min.js' });
-await pg.addScriptTag({ path:'node_modules/pdfjs-dist/build/pdf.min.js' });
-await pg.addScriptTag({ path:'node_modules/pdfjs-dist/build/pdf.worker.min.js' });
+await pg.addScriptTag({ path:XLSX_JS });
+await pg.addScriptTag({ path:PDFJS });
+await pg.addScriptTag({ path:PDFJS_W });
 await pg.waitForTimeout(700);
 await pg.evaluate(()=>{ try{ pdfjsLib.GlobalWorkerOptions.workerSrc='local'; }catch(e){} });
 
@@ -29,7 +30,7 @@ const s = await pg.$('text=Load sample'); if (s){ await s.click(); await pg.wait
 console.log('  ' + await pg.evaluate(()=>S.company.name + ' — FY ' + S.meta.financialYear));
 
 step(3,'JET-EFF WORKBOOK');
-const wb = fs.readFileSync('t/JetData_ShreeMahadev.xlsx').toString('base64');
+const wb = fs.readFileSync(fx('JetData_ShreeMahadev.xlsx')).toString('base64');
 const jlog = await pg.evaluate(b64=>{
   const bin=atob(b64),a=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);
   return importAny(XLSX.read(a,{type:'array'}));
@@ -40,7 +41,7 @@ check('recommendations written to the ledger', jlog.some(l=>/recommendation\(s\)
 
 step(4,'WRONG-COMPANY GUARD');
 pg.on('dialog', d => d.dismiss());
-const bad = fs.readFileSync('t/JetData_WrongCompany.xlsx').toString('base64');
+const bad = fs.readFileSync(fx('JetData_WrongCompany.xlsx')).toString('base64');
 const guard = await pg.evaluate(b64=>{
   const bin=atob(b64),a=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);
   const before=S.jets.length;
@@ -50,7 +51,7 @@ const guard = await pg.evaluate(b64=>{
 check('a different plant is refused', guard.ok && guard.unchanged, guard.msg);
 
 step(5,'BILL PDF — 12 pages, label-anchored extraction');
-const pdf = fs.readFileSync('t/bills-12-months.pdf').toString('base64');
+const pdf = fs.readFileSync(fx('bills-12-months.pdf')).toString('base64');
 const bills = await pg.evaluate(async b64=>{
   const bin=atob(b64),a=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);
   S.bills=[];
@@ -152,9 +153,9 @@ const ex = await pg.evaluate(()=>({
   template: XLSX.write(buildModuleWorkbook(false), {type:'base64',bookType:'xlsx'}),
   full:     XLSX.write(buildModuleWorkbook(true),  {type:'base64',bookType:'xlsx'}),
   t: buildModuleWorkbook(false).SheetNames.length, f: buildModuleWorkbook(true).SheetNames.length }));
-fs.writeFileSync('out/PostMan-module-template.xlsx', Buffer.from(ex.template,'base64'));
-fs.writeFileSync('out/PostMan-report-workbook.xlsx', Buffer.from(ex.full,'base64'));
-await pg.pdf({ path:'out/PostMan-report.pdf', width:'794px', height:'1123px', printBackground:true });
+fs.writeFileSync(out('PostMan-module-template.xlsx'), Buffer.from(ex.template,'base64'));
+fs.writeFileSync(out('PostMan-report-workbook.xlsx'), Buffer.from(ex.full,'base64'));
+await pg.pdf({ path:out('PostMan-report.pdf'), width:'794px', height:'1123px', printBackground:true });
 console.log(`  blank template ${ex.t} sheets · report workbook ${ex.f} sheets · A4 PDF written`);
 check('PDF has one page per report page', true);
 

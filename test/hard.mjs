@@ -1,15 +1,16 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
+import { APP, PDFJS, PDFJS_W, XLSX_JS, fx } from './_paths.mjs';
 const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium' });
 const pg = await b.newPage();
 const errs=[]; pg.on('pageerror',e=>errs.push(e.message));
-await pg.goto('file:///home/claude/pm/app.html');
-await pg.addScriptTag({ path:'node_modules/xlsx/dist/xlsx.full.min.js' });
-await pg.addScriptTag({ path:'node_modules/pdfjs-dist/build/pdf.min.js' });
-await pg.addScriptTag({ path:'node_modules/pdfjs-dist/build/pdf.worker.min.js' });
+await pg.goto(APP);
+await pg.addScriptTag({ path:XLSX_JS });
+await pg.addScriptTag({ path:PDFJS });
+await pg.addScriptTag({ path:PDFJS_W });
 await pg.waitForTimeout(600);
 await pg.evaluate(()=>{ try{pdfjsLib.GlobalWorkerOptions.workerSrc='local';}catch(e){} S.bills=[]; S.company.name=''; });
-const pdf = fs.readFileSync('t/bill-tabular.pdf').toString('base64');
+const pdf = fs.readFileSync(fx('bill-tabular.pdf')).toString('base64');
 const out = await pg.evaluate(async b64=>{
   const bin=atob(b64),a=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);
   await ingestBillPdf(new File([a],'tabular.pdf',{type:'application/pdf'}), p=>attachPage(p));

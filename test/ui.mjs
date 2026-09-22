@@ -1,26 +1,27 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
+import { APP, PDFJS, PDFJS_W, XLSX_JS, fx, out } from './_paths.mjs';
 const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium' });
 const pg = await b.newPage({ viewport:{width:1600,height:1050}, deviceScaleFactor:2 });
 const errs=[]; pg.on('pageerror',e=>errs.push(e.message));
 pg.on('console',m=>{ if(m.type()==='error' && !/ERR_TUNNEL|ERR_NAME|fonts\.g/.test(m.text())) errs.push('console: '+m.text()); });
-await pg.goto('file:///home/claude/pm/app.html');
-await pg.addScriptTag({ path:'node_modules/xlsx/dist/xlsx.full.min.js' });
-await pg.addScriptTag({ path:'node_modules/pdfjs-dist/build/pdf.min.js' });
-await pg.addScriptTag({ path:'node_modules/pdfjs-dist/build/pdf.worker.min.js' });
+await pg.goto(APP);
+await pg.addScriptTag({ path:XLSX_JS });
+await pg.addScriptTag({ path:PDFJS });
+await pg.addScriptTag({ path:PDFJS_W });
 await pg.waitForTimeout(700);
 const s = await pg.$('text=Load sample'); if (s){ await s.click(); await pg.waitForTimeout(400); }
 await pg.evaluate(()=>{ try{pdfjsLib.GlobalWorkerOptions.workerSrc='local';}catch(e){} S.bills=[]; });
 
 // --- bills
-const pdf = fs.readFileSync('t/bills-12-months.pdf').toString('base64');
+const pdf = fs.readFileSync(fx('bills-12-months.pdf')).toString('base64');
 await pg.evaluate(async (b64)=>{
   const bin=atob(b64),a=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)a[i]=bin.charCodeAt(i);
   await ingestBillPdf(new File([a],'bills.pdf',{type:'application/pdf'}), p=>attachPage(p));
   S.active='verify'; S.billCursor=3; save(); renderAll();
 }, pdf);
 await pg.waitForTimeout(900);
-await pg.screenshot({ path:'t/ui-verify.png' });
+await pg.screenshot({ path:out('ui-verify.png') });
 console.log('verify screen captured');
 
 // verify flow: press Verify twice and check it advances and counts
@@ -88,7 +89,7 @@ console.log('first contents lines:\n  ' + rep.sample.join('\n  '));
 
 // screenshot the contents page and the custom page
 const wraps = await pg.$$('.pagewrap');
-if (rep.tocPage) await wraps[rep.tocPage-1].screenshot({ path:'t/ui-contents.png' });
-if (rep.customPage) await wraps[rep.customPage-1].screenshot({ path:'t/ui-custom.png' });
+if (rep.tocPage) await wraps[rep.tocPage-1].screenshot({ path:out('ui-contents.png') });
+if (rep.customPage) await wraps[rep.customPage-1].screenshot({ path:out('ui-custom.png') });
 console.log('\npage errors:', errs.length?errs:'none');
 await b.close();

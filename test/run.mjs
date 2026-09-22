@@ -1,13 +1,14 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
+import { APP, XLSX_JS, fx, out } from './_paths.mjs';
 const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium' });
 const pg = await b.newPage({ viewport:{width:1500,height:1000} });
 const errs = [];
 pg.on('console', m => { if (m.type()==='error') errs.push(m.text()); });
 pg.on('pageerror', e => errs.push('PAGEERROR: '+e.message));
-await pg.goto('file:///home/claude/pm/app.html');
+await pg.goto(APP);
 // cdnjs is unreachable offline; inject the same pinned build locally
-await pg.addScriptTag({ path:'node_modules/xlsx/dist/xlsx.full.min.js' });
+await pg.addScriptTag({ path:XLSX_JS });
 await pg.waitForTimeout(700);
 
 // load sample data (gives us a company name + the rest of the report)
@@ -28,11 +29,11 @@ async function importFile(path){
 
 // guard: wrong company must be refused (confirm auto-dismissed = Cancel)
 pg.on('dialog', d => d.dismiss());
-console.log('WRONG COMPANY ->', JSON.stringify(await importFile('t/JetData_WrongCompany.xlsx')));
+console.log('WRONG COMPANY ->', JSON.stringify(await importFile(fx('JetData_WrongCompany.xlsx'))));
 console.log('jets after refusal =', await pg.evaluate(()=>S.jets.length));
 
 // right company must import
-const r = await importFile('t/JetData_ShreeMahadev.xlsx');
+const r = await importFile(fx('JetData_ShreeMahadev.xlsx'));
 console.log('RIGHT COMPANY ->', JSON.stringify(r, null, 1));
 await pg.evaluate(()=>{ save(); renderAll(); });
 await pg.waitForTimeout(900);
@@ -55,5 +56,5 @@ console.log('ledger =', JSON.stringify(info.ledger, null, 1));
 console.log('rollup =', JSON.stringify({n:info.roll.n, steam:info.roll.steam.toFixed(1), total:Math.round(info.roll.total), invest:Math.round(info.roll.invest), avgEff:info.roll.avgEff?.toFixed(1), passing:info.roll.passing.length, weak:info.roll.weak.length, roi:info.roll.roi?.toFixed(1)}));
 console.log('console errors =', errs.length ? errs : 'none');
 
-await pg.pdf({ path:'t/out.pdf', width:'794px', height:'1123px', printBackground:true });
+await pg.pdf({ path:out('out.pdf'), width:'794px', height:'1123px', printBackground:true });
 await b.close();

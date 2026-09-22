@@ -1,13 +1,14 @@
 import { chromium } from 'playwright';
 import fs from 'fs';
+import { APP, TESSERACT, XLSX_JS, fx } from './_paths.mjs';
 const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium' });
 const pg = await b.newPage();
 pg.on('pageerror',e=>console.log('PAGEERROR',e.message));
-await pg.goto('file:///home/claude/pm/app.html');
-await pg.addScriptTag({ path:'node_modules/xlsx/dist/xlsx.full.min.js' });
-await pg.addScriptTag({ path:'node_modules/tesseract.js/dist/tesseract.min.js' });
+await pg.goto(APP);
+await pg.addScriptTag({ path:XLSX_JS });
+await pg.addScriptTag({ path:TESSERACT });
 await pg.waitForTimeout(600);
-const jpg = fs.readFileSync('t/bill-photo.jpg').toString('base64');
+const jpg = fs.readFileSync(fx('bill-photo.jpg')).toString('base64');
 const r = await pg.evaluate(async b64 => {
   S.bills = [];
   const row = { month:'', img:{ dataUrl:'data:image/jpeg;base64,'+b64 }, hits:{} };

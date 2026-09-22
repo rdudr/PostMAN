@@ -587,6 +587,77 @@ function syncJetLedger(){
   return n;
 }
 
+
+/* The compressor equivalent of syncJetLedger: the two things a compressor
+   survey actually finds, priced, so they reach the executive summary and the
+   savings table rather than sitting in the module where nobody adds them up.
+
+   Only the EXCESS over design SEC is counted as recoverable, not the whole
+   consumption. A compressor 17 % above design does not stop using power when
+   it is fixed; it uses what the design says it should.  */
+function syncCompressorLedger(){
+  var rate = num(S.costs.unitRate);
+  var gef = num(S.costs.gridEF) || 0.716;
+
+  var sec = S.compressor.map(function(k){ return { k:k, d:compressorCalc(k) }; })
+    .filter(function(x){ return x.d.deviation !== null && x.d.deviation > 10 && x.d.annualKwh; });
+  var idle = S.compressor.map(function(k){ return { k:k, d:compressorCalc(k) }; })
+    .filter(function(x){ return x.d.loadPct !== null && x.d.loadPct < 60 && x.d.idleKwh; });
+
+  var specs = [];
+  if (sec.length){
+    var kwh = 0, tags = [];
+    sec.forEach(function(x){
+      kwh += x.d.annualKwh * (x.d.deviation / (100 + x.d.deviation));
+      tags.push(x.k.tag || 'compressor');
+    });
+    kwh = Math.round(kwh);
+    specs.push({ key:'cmp-sec', type:'electrical', priority:'high',
+      observation: tags.join(', ') + ' measured ' +
+        fix(sec.reduce(function(a,x){ return a + x.d.deviation; }, 0) / sec.length, 1) +
+        ' % above design specific energy consumption on the ' +
+        (sec[0].d.testType === 'Pump-up' ? 'pump-up' : 'free air delivery') + ' test.',
+      recommendation:'Overhaul or service the compressors running above design SEC - air-end clearances, ' +
+        'intake filter, inter- and after-cooler fouling and belt slip are the usual causes - and repeat the ' +
+        'capacity test to confirm the recovery.',
+      unit:'kWh/yr', saving:kwh, monetary:Math.round(kwh * (rate || 0)), investment:0,
+      co2: Math.round(kwh * gef / 1000 * 10) / 10 });
+  }
+  if (idle.length){
+    var ikwh = Math.round(idle.reduce(function(a,x){ return a + x.d.idleKwh; }, 0));
+    specs.push({ key:'cmp-idle', type:'electrical', priority:'medium',
+      observation: idle.map(function(x){ return (x.k.tag || 'compressor') + ' loaded only ' +
+        fix(x.d.loadPct,1) + ' % of its running hours'; }).join('; ') +
+        ', drawing unload power for the rest.',
+      recommendation:'Sequence the compressors so that one machine trims and the rest run loaded or stop, ' +
+        'and fix the leaks that keep an unloaded machine cycling. A variable speed drive on the trim machine ' +
+        'is the next step where the load swings.',
+      unit:'kWh/yr', saving:ikwh, monetary:Math.round(ikwh * (rate || 0)), investment:0,
+      co2: Math.round(ikwh * gef / 1000 * 10) / 10 });
+  }
+
+  var n = 0;
+  specs.forEach(function(sp){
+    var row = null;
+    for (var i = 0; i < S.ledger.length; i++)
+      if (S.ledger[i].autoKey === sp.key){ row = S.ledger[i]; break; }
+    if (row && row.locked) return;
+    if (!row){ row = { id:uid(), autoKey:sp.key, module:'compressor', status:'draft', actionBy:'Plant' };
+               S.ledger.push(row); }
+    row.module = 'compressor'; row.type = sp.type; row.priority = sp.priority;
+    row.observation = sp.observation; row.recommendation = sp.recommendation;
+    row.unit = sp.unit; row.saving = sp.saving; row.monetary = sp.monetary;
+    row.investment = sp.investment; row.co2 = sp.co2;
+    row.consumption = row.consumption || null;
+    n++;
+  });
+  var live = {}; specs.forEach(function(sp){ live[sp.key] = 1; });
+  S.ledger = S.ledger.filter(function(r){
+    return !r.autoKey || !/^cmp-/.test(r.autoKey) || live[r.autoKey] || r.locked;
+  });
+  return n;
+}
+
 /* ===================================================================
    JET-Eff record model, mirrored exactly.
 
@@ -785,6 +856,48 @@ function importACmp(wb){
       runningPressure: num(pick(r,[pumpCfm ? 'pumpRunningPressure' : 'fadRunningPressure','fadRunningPressure','pumpRunningPressure'])),
       loadHrs: num(pick(r,['luLoadHours'])), unloadHrs: num(pick(r,['luUnloadHours'])),
       totalHrs: num(pick(r,['luTotalHours'])), hoursPerDay:24,
+
+      /* What A-CMP itself computed. These used to be dropped and the
+         figures recomputed here from the raw inputs, which put a different
+         number in the report from the one on the engineer's own screen with
+         nothing to say which was right. On the AC-02 fixture the difference
+         is 15 % on delivered air, because the app's pump-up test applies the
+         temperature correction 273/(273+T) and the quick formula does not,
+         and its FAD test averages an anemometer traverse rather than taking
+         one reading. compressorCalc prefers these and says so when the
+         recomputed value disagrees by more than 3 %. */
+      designedSec: num(pick(r,['designedSec'])),
+      designedAirGen: num(pick(r,['designedAirGen'])),
+      fadAirDeliveryCfm: num(pick(r,['fadAirDeliveryCfm'])),
+      pumpActualFadCfm: pumpCfm,
+      fadActualSec: num(pick(r,['fadActualSec'])),
+      fadActualAirGen: num(pick(r,['fadActualAirGen'])),
+      /* A-CMP writes the compressed-air temperature AND the factor it
+         derived from it. Take the factor when it is there; deriving it again
+         from the temperature is only the fallback. */
+      pumpAirTemp: num(pick(r,['pumpAirTempC','pumpAirTemp'])),
+      pumpTempFactor: num(pick(r,['pumpTempFactor'])),
+
+      /* Unloaded running is the other half of the compressor story: a
+         machine idling half its life burns real money making no air. */
+      genLoadKw: num(pick(r,['genLoadKw'])),
+      genUnloadKw: num(pick(r,['genUnloadKw'])),
+      annualOperatingDays: num(pick(r,['annualOperatingDays'])),
+      powerCost: num(pick(r,['powerCost'])),
+
+      /* Carried under A-CMP's own names because PostMan has no counterpart.
+         A column added there therefore reaches the report with no code
+         change here. */
+      serialNo: pick(r,['serialNo']) || '',
+      ratedHp: num(pick(r,['ratedHp'])),
+      starter: pick(r,['starterType']) || '',
+      recordedBy: pick(r,['recordedBy']) || '',
+      obsThermalImageNo: pick(r,['obsThermalImageNo']) || '',
+      obsCompDischarge: num(pick(r,['obsCompDischarge'])),
+      obsOilCooler: num(pick(r,['obsOilCooler'])),
+      obsAfterCooler: num(pick(r,['obsAfterCooler'])),
+      obsMotorBody: num(pick(r,['obsMotorBody'])),
+
       obs: [pick(r,['description']), pick(r,['fadDescription']), pick(r,['pumpDescription'])]
              .filter(function(t){ return t; }).join(' ') };
   }).filter(function(n){ return n.tag; });   /* Excel loves trailing blank rows */
@@ -795,6 +908,11 @@ function importACmp(wb){
   S.compressor = keep.concat(incoming);
   S.enabled.compressor = true;
   log.push(incoming.length + ' compressor' + (incoming.length === 1 ? '' : 's') + ' from A-CMP');
+
+  var drift = S.compressor.map(compressorCalc).filter(function(d){ return d.drift; }).length;
+  if (drift) log.push(drift + ' machine(s) where the recomputed figure differs from the app\u2019s by more than 3 %');
+  var made = syncCompressorLedger();
+  if (made) log.push(made + ' recommendation(s) written to the ledger');
   return log;
 }
 
@@ -962,8 +1080,23 @@ var SHEETS = [
     cols:[['month','Month','s'],['qty','Units kWh','n'],['cost','Cost Rs','n'],['prod','Production','n']] },
   { name:'Baseline Thermal', path:'baseline.thermal', label:'Thermal baseline',
     cols:[['month','Month','s'],['qty','Quantity','n'],['cost','Cost Rs','n'],['prod','Production','n']] },
-  { name:'Baseline Water', path:'baseline.water', label:'Water baseline',
-    cols:[['month','Month','s'],['qty','Quantity m3','n'],['cost','Cost Rs','n'],['prod','Production','n']] },
+  /* The baseline model keeps water as a month-key map, and
+     syncBaselineLegacy mirrors it to a flat array for everything that reads
+     rows. The spec pointed at the map: buildModuleWorkbook called forEach on
+     an object and threw, which broke BOTH the blank template and "Export
+     this report as a workbook" - the crash was in the shared builder, so the
+     button that never touches water died too. `after` puts an imported sheet
+     back into the map, or the next syncBaselineLegacy would erase it. */
+  { name:'Baseline Water', path:'baseline.waterRows', label:'Water baseline',
+    cols:[['month','Month','s'],['m3','Quantity m3','n']],
+    after:function(rows){
+      var b = S.baseline, byLabel = {};
+      (b.months || []).forEach(function(p){ byLabel[monthLabelOf(p.y,p.m)] = monthKey(p.y,p.m); });
+      rows.forEach(function(r){
+        var k = byLabel[String(r.month).trim()];
+        if (k && r.m3 !== null && r.m3 !== '') b.water[k] = r.m3;
+      });
+    } },
 
   { name:'PCC Loads', path:'dist.pcc', label:'PCC panel loads',
     cols:[['name','Name of machine','s'],['v','Voltage','n'],['i','Current','n'],['kw','kW','n'],
@@ -1069,6 +1202,7 @@ function importModules(wb){
     });
     var t = atPath(sp.path);
     t.parent[t.key] = out;
+    if (sp.after) sp.after(out);
     var flag = { 'boiler.spec':'boiler', 'tfh.spec':'tfh', 'chiller.readings':'chiller',
                  'solar.rows':'solar', 'coolingTower':'coolingTower', 'compressor':'compressor',
                  'pumps':'pumps', 'lux':'lux', 'earth':'earth', 'sop':'sop' }[sp.path];

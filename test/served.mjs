@@ -2,6 +2,7 @@
    folder, with every library vendored beside it and no CDN in reach. */
 import { chromium } from 'playwright';
 import fs from 'fs';
+import { fx } from './_paths.mjs';
 
 const b = await chromium.launch({ executablePath:'/opt/pw-browsers/chromium' });
 const pg = await b.newPage({ viewport:{width:1600,height:1050} });
@@ -27,7 +28,7 @@ console.log('OCR local / fallback  :', libs.ocrLocal, '/', libs.ocrCdn);
 const s = await pg.$('text=Load sample');
 if (s) { await s.click(); await pg.waitForTimeout(500); }
 
-const pdf = fs.readFileSync('t/bills-12-months.pdf').toString('base64');
+const pdf = fs.readFileSync(fx('bills-12-months.pdf')).toString('base64');
 const bills = await pg.evaluate(async b64 => {
   const bin = atob(b64), a = new Uint8Array(bin.length);
   for (let i=0;i<bin.length;i++) a[i] = bin.charCodeAt(i);
@@ -38,7 +39,7 @@ const bills = await pg.evaluate(async b64 => {
 }, pdf);
 console.log('bills, vendored pdf.js:', JSON.stringify(bills));
 
-const wb = fs.readFileSync('t/JetData_ShreeMahadev.xlsx').toString('base64');
+const wb = fs.readFileSync(fx('JetData_ShreeMahadev.xlsx')).toString('base64');
 const jets = await pg.evaluate(b64 => {
   const bin = atob(b64), a = new Uint8Array(bin.length);
   for (let i=0;i<bin.length;i++) a[i] = bin.charCodeAt(i);
