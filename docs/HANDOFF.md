@@ -159,12 +159,20 @@ works.
 node test/handoff.mjs
 ```
 
-## 7. Two things that are still on the apps
+## 7. Keeping the two sides in step
 
-- **JET-Eff's rupee bug.** `insAnnualFuelSaving` is in tonnes/yr and
-  `fuelCost` is in ₹/kg; multiplying them directly understates every jet
-  saving by 1000×. PostMan recomputes, so the report is right and the app's
-  own dashboard is not. Fix it there.
+- **JET-Eff's fuel-cost unit.** Its field said **₹/Ton** while every
+  engineer typed the per-kg price into it (6.5 for coal), so its own
+  dashboard read every jet saving 1000× too small — ₹32.50 for a ₹32,500
+  saving, with ROIs in centuries. The field now says **₹/kg** and both
+  sides multiply the same way. PostMan recomputes from the raw columns
+  rather than trusting the stored `*MonitoringSaving` values, so a workbook
+  exported before that fix still reads correctly.
+
+  Worth remembering how this was found: the unit was wrong in the
+  *label*, not in the arithmetic, and two codebases had agreed on the wrong
+  reading of each other for months. Check the label before blaming the
+  formula.
 - **A field added on one side is a field added on the other.** A new column
   travels to PostMan with no code change, but nothing prints it until a
   fixture and a line of the chapter exist. See `INTEGRATIONS.md`.

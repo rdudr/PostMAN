@@ -3042,11 +3042,17 @@ function recalcJet(j, cost){
   j.insAnnualFuelSaving = j.insDailyFuelSaving !== null ? rnd((j.insDailyFuelSaving * days) / 1000, 3) : null;
   j.insInvestment = (insCost > 0 && pos(j.surfaceArea) > 0) ? rnd(insCost * j.surfaceArea, 2) : null;
   /* UNIT NOTE: insAnnualFuelSaving is in TONNE/yr and fuelCost is in RUPEES
-     PER KG (6.5 for coal). JET-Eff multiplies them directly, which is a
-     1000x under-statement - a jet saving 5 t/yr of coal comes out at Rs 34
-     instead of Rs 34,125, and every ROI it feeds reads in centuries. The
-     report converts to kg first. Anything the workbook already stored in
-     these fields is recomputed, not trusted. */
+     PER KG - 6.5 for coal, which is what engineers type and what every
+     sample profile holds. So the tonnes are converted to kg first.
+
+     JET-Eff's field was labelled Rs/Ton and its arithmetic matched that
+     label, so with 6.5 in the box a jet saving 5 t/yr came out at Rs 32.50
+     instead of Rs 32,500 and the ROI read in centuries. The label was the
+     thing that was wrong: nobody was entering a per-tonne price. JET-Eff
+     now says Rs/kg, multiplies by 1000 here too, and warns if a per-tonne
+     figure is typed in. The two sides agree; do not change one without the
+     other. Stored *MonitoringSaving columns are recomputed, not trusted,
+     because a workbook exported before that fix carries the old figures. */
   j.insMonitoringSaving = (j.insAnnualFuelSaving !== null && fuelCost > 0)
     ? rnd(j.insAnnualFuelSaving * 1000 * fuelCost, 2) : null;
   j.insRoiMonths = (j.insInvestment !== null && j.insMonitoringSaving > 0)
