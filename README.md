@@ -1,163 +1,83 @@
 # PostMan
 
-KISEM Detailed Energy Assessment report generator — IEA, IIT Gandhinagar.
+Detailed Energy Assessment report generator for **KISEM / IEA, IIT Gandhinagar**.
 
-## The whole tool is one file
+One self-contained HTML file. No build step to run it, no server, no install.
+Open `index.html`, or use the deployed URL.
 
-**`PostMan.html`** — double-click it. That is everything: the editor, the
-report engine, the bill reader, the charts, the exports. Nothing to install,
-no server, no `npm install`, no folder of parts.
+---
 
-To share it with a colleague, send them that one file. To keep a version,
-copy it. It opens in any modern browser and keeps your draft in that browser,
-so two people opening the same file each have their own work.
+## What it does
 
-The same file is served online as `index.html` (repository
-https://github.com/rdudr/PostMAN, deployed by Vercel on every push). Both are
-built from the parts in `src/` by `python src/build.py`.
+Turns a plant visit into a signed KISEM Detailed Energy Assessment Report.
 
-## What it needs from the internet
+- **Bills** — drop in a 12-page PDF, twelve separate PDFs, or photographs.
+  Figures are extracted and shown beside the bill itself; you check each one
+  and press Verify. Nothing counts until a person has looked at it.
+- **Field data** — one import door for every workbook. JET-Eff, A-CMP, or the
+  module workbook you download from the app and take to site. The file is
+  identified from its own contents and refused if it belongs to another plant.
+  The contract with the field apps — which columns, which arithmetic has to
+  stay identical on both sides, what to do when one of them changes — is
+  [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
+- **Modules** — boiler, thermic fluid heater, compressor, cooling tower,
+  chiller, pumps, jet machines, lux, solar, earth pits, machine monitoring,
+  SOP. Switch on only what the plant has.
+- **Recommendation ledger** — every saving lives here exactly once. The
+  certificate, the executive summary, the savings table and each module's
+  recommendations are all views of the same rows, so no two pages can
+  disagree. (The reference report we started from states two different
+  headline savings four pages apart. That is the bug this design removes.)
+- **Your own pages** — photos, tables, notes, placed anywhere in the report.
+- **Contents page** with real page numbers, and true-A4 print.
 
-Nothing, to run. It will reach out for three optional things:
+## Layout
 
 | | |
 |---|---|
-| Report fonts | falls back to close matches if unavailable |
-| Spreadsheet reader | needed to import JET-Eff / A-CMP / module workbooks |
-| OCR reader | only for **photographs** of bills; downloads ~5 MB the first time |
+| `index.html` | the whole tool, generated — **do not edit by hand** |
+| `src/p*.js`, `src/p*.html` | the source parts |
+| `src/build.py` | concatenates them into `index.html` |
+| `src/art/` | the KISEM cover and letterhead plates |
+| `test/` | Playwright suites, bill and field-app fixtures |
+| `docs/INTEGRATIONS.md` | the contract with JET-Eff and A-CMP |
+| `vercel.json` | static hosting config |
 
-Bills supplied as PDFs are read without any of that. If the OCR reader cannot
-be downloaded — no internet, or a network that blocks it — the screen says so
-plainly and you read the figures off the bill, which is displayed full-size
-beside the fields.
+### Building
 
-## The workflow
+```bash
+python3 src/build.py      # → index.html
+```
 
-1. **Cover & report** — company, financial year, logo, gate photograph.
-2. **Electricity bills** — built to the team's own workbook ("EB Bill &
-   Base", sheet *Report Formet*): the nine yellow cells per month — month,
-   units, bill amount, power factor, actual MD, energy rate, FPPA rate, night
-   units, TOU units — plus the tariff header (DISCOM, consumer number,
-   contract demand, tariff) are read off the bills; every other column is a
-   formula or a GERC default (85 % minimum billing demand, Rs 150/260 demand
-   slabs, TOU Rs 0.85, EHV 1 %, duty 15 %, the PF rebate/penalty bands). A
-   Difference column reconciles the computed bill against the amount read
-   off the bill, so a misread figure or a default that does not apply shows
-   as red. The full analysis prints on three turned sheets in the workbook's
-   layout — the reader turns the page clockwise — followed by the standard
-   summary, load factors, charts, and the PF and contract-demand proposals.
-   Rates not printed on a bill are derived from its charges and marked so.
-2a. **Bill capture & verify** — drop in bill PDFs or photographs. Figures are
-   read out automatically and shown beside the bill itself; check each one and
-   press Verify. Nothing counts until a person has looked at it.
-3. **Import field data** — one door for every workbook. JET-Eff, A-CMP, the
-   FOX KISEM export, a PQ-analyser "PostMan export", or the module workbook
-   you can download from that screen and take to site. The file is
-   identified from its own contents and checked against this report's
-   company before anything is written.
-3a. **Single line diagram** — built from cards, not drawn: add a main input,
-   then PCC panels under it, MCC panels and loads under those. Each card
-   holds the rating, kW, kVA, PF, %VTHD, %ITHD and the PQ recording ID; boxes
-   size themselves to their text, a provisional node is dashed, and a node
-   over the IEEE-519 THD limits is outlined red. Click a box to select it and
-   press Delete (or the card's Delete) — its children move up to its parent.
-3b. **Electrical distribution chapter** — assembled in this order: the single
-   line diagram; the demand study; one section per **plant main input** and
-   then per **PCC panel**, each with *Measured at the panel* (the FOX
-   figures) and *Power quality analysis* (the analyser recording: voltage,
-   current, PF, THD against IEEE-519, harmonic spectrum); the PCC load
-   summary with its charts; MCC panels; the motor load study split into
-   clamp-meter and PQ-analyser readings, each motor marked Working OK,
-   Acceptable, Under-loaded or Overloaded by its load factor; and the APFC
-   panels with a stage-current chart and remarks. Every table fed by FOX
-   carries "Last uploaded data on *date, time* from *person*". The full
-   measurement charts for every recording go to **Annexure A** at the very
-   end of the report, listed in the Contents.
+`build.py` also escapes every non-ASCII character, so the page renders
+identically whether or not a charset header is sent, and asserts the output is
+pure ASCII before writing.
 
-   The two feeds: the **FOX KISEM** app's Excel export (sheets *Plant Main
-   Inputs, PCC Panels, MCC Panels, Motor Loads Clamp, Motor Loads PQ, APFC*)
-   and the **AI-PQA** analyser. On the analyser's dashboard, **Send to
-   PostMan** names the panel and recording ID and parks the recording on
-   the server for 24 hours; on the Electrical distribution page, *List
-   recordings* shows what was sent and *Import* brings it in. The server
-   does the heavy work on the whole recording (a week at one second is
-   fine). Each panel's section then carries the analyser's own charts
-   (captured from its dashboard, not redrawn), its **standards compliance**
-   table (IEEE 519, EN 50160, IEC 61000-3-14, PF — measured, limit, verdict,
-   remark, score), **equipment health** (five scored components), the
-   **cost of poor power quality** with the tariff figures typed on the
-   analyser, **events detected** (counts, the worst events, dips and
-   swells), data quality and observations; the PCC load summary gains a
-   Compliance column and Annexure A carries every dashboard chart.
-   Offline, *Save bundle file instead* (JSON) or the Excel export drop into
-   the same box. Recordings are joined to panels by the
-   *Recording ID* written on the FOX panel sheet. The contracts are written
-   up in `docs/POSTMAN_EXPORT.md` of the AI-PQA repository
-   (https://github.com/rdudr/AI-PQA) and `docs/POSTMAN_IMPORT.md` of the FOX
-   KISEM project.
-3c. **Boiler and thermic fluid heater from Thermo-X** — drop the Thermo-X
-   app's Excel exchange file (Report → Export Excel) on the Boiler page, the
-   Thermic fluid heater page or Import field data. The chapter then prints
-   from it with Thermo-X's own formulas: efficiency summary and chart, the
-   fuels' laboratory analyses, each boiler's name-plate, the direct method
-   (daily log, steam table, efficiency, evaporation ratio), the indirect
-   method (losses L1–L8 per sample and overall, loss chart, the KANE
-   analyser recording with the samples marked) and the observations. A
-   Thermo-X boiler typed *Thermic fluid heater* prints in the TFH chapter.
-   The typed cards below are used only when there is no Thermo-X data.
+### Testing
 
-   Every chapter that takes a workbook has its own drop box, which accepts
-   several files at once; every import merges by the record's own key, so
-   nothing is ever duplicated. How the apps and PostMan are kept in step —
-   and the rule that every touched repository is pushed — is written up in
-   [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
-4. **Modules** — switch on only the utilities the plant actually has.
-5. **Recommendations** — every chapter screen ends with "Add recommendation
-   to this chapter". Each one carries a title, observation and recommendation;
-   optionally a normal and thermal photograph side by side, a graph, and a
-   table of your own figures; then the benefit worked out in the open:
+```bash
+npm i playwright pdfjs-dist xlsx
+node test/full.mjs        # 12 stages, the whole project
+node test/hard.mjs        # a tabular bill layout that defeats naive parsing
+node test/acmp.mjs        # the A-CMP compressor path, end to end
+```
 
-   | | |
-   |---|---|
-   | Technical, electrical | kW saved × hours/day = kWh/day; × working days = kWh/year |
-   | Technical, thermal | units/hour × hours/day × working days, in kg, litre or scm — one block per fuel, as many as needed |
-   | Monetary | kWh × ₹/kWh, plus each fuel × its ₹/unit; total is the sum |
-   | Payback | investment ÷ total annual saving × 12, in months |
+`full.mjs` covers boot, workbook import, the wrong-company guard, bill
+ingestion, the verify flow, custom pages and the contents page, the ledger,
+opening all 31 sections, exports, print, and three screen sizes.
 
-   The printed page shows every multiplication, so a reader can check it.
-   The certificate, executive summary and savings table all read from the
-   same list, so no two pages can disagree.
-6. **Energy, water and GHG baseline** — one list of months chosen from
-   menus (never typed) shared by every baseline table. Production in whatever
-   unit the plant counts; Grid Input Energy plus any other electrical sources
-   (solar, turbine); any number of fuels, each with its own unit and calorific
-   value; water from a named source. TOE, specific consumption, totals and
-   averages are all derived from that one set of figures, the conversion
-   factors are printed under every table, and the electrical, thermal,
-   overall and water tables each carry their charts. The GHG chapter's
-   boundary text is standing prose with the figures filled in — Scope 1 per
-   fuel plus mobile combustion, Scope 2 from the grid with on-site generation
-   and renewable offsets shown. Then, as in the sample reports, SCOPE-01 is
-   worked one fuel at a time — a table of month, amount, unit, factor and
-   tCO₂e, then that fuel's chart, then the next fuel — SCOPE-02 the same way
-   for purchased electricity, and an emission baseline with a column per
-   fuel, Scope 2, the total, tCO₂e per unit of production, and its charts.
-   Emission factors are asked for on the GHG screen, one per fuel and one
-   for the grid.
+## Why it is hosted
 
-   The Average row's specific consumption is total over total for the period,
-   not the mean of the monthly ratios; a low-output month would otherwise pull
-   the year's figure about out of proportion to its energy.
-7. **Your own pages** — anything the generated sections cannot hold: photos,
-   tables, notes, placed wherever you want in the report.
-8. **Print / PDF** — true A4, one page per page.
+The file works opened directly, but a `file://` page has no origin, and that
+one fact disables the OCR reader — it cannot load its worker or its language
+model. Served over https, everything works, including reading a photographed
+bill and the drag-a-box tool.
 
-## Also in this folder
+Nothing is uploaded. Every draft lives in the browser's own storage on the
+machine that made it; export a draft as JSON to move it.
 
-`report design\` the KISEM cover and letterhead artwork as supplied ·
-`sample bills\` test bills including a 12-month PDF ·
-`sample reports\` the three reference reports the engine was derived from ·
-`logos\` IITGN and KISEM marks.
+## Access
 
-These are source material, not part of the tool. PostMan.html does not read
-them; you can move them anywhere.
+Vercel projects are public by default. This page carries the KISEM letterhead
+artwork and IEA contact details, so if that matters, enable Deployment
+Protection (Project → Settings) before sharing the link.

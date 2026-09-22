@@ -2,5 +2,3 @@ node_modules/
 out/
 *.log
 .vercel
-# build.py writes the same bytes twice; index.html is the tracked copy
-PostMan.html
