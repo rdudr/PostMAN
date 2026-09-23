@@ -1,6 +1,29 @@
+# Build and tooling
 node_modules/
 out/
 *.log
 .vercel
-# build.py writes the same bytes twice; index.html is the tracked copy
+.claude/
+
+# Working material, not the product. The reference reports, sample bills,
+# letterhead artwork, logos and the downloaded vendor copies live beside the
+# repository in _material/ - they are what the tool was BUILT from, not part
+# of what it ships, and 148 MB of them in git made every clone a download
+# nobody wanted. Nothing here is lost; it is next to the code, ignored.
+_material/
+_to_delete/
+patches/
+sample bills/
+sample reports/
+report design/
+logos/
+vendor/
+
+# Superseded: the offline launcher, the double-clickable duplicate of
+# index.html, and the push notes for a push that has happened.
+serve.js
 PostMan.html
+PUSH.md
+APPLY.md
+*.cmd
+*.zip

@@ -73,40 +73,113 @@ function moduleFilled(id){
 }
 
 /* ---- the handoff ---------------------------------------------------
-   PostMan opens the app with the plant already named, so nobody retypes
-   it and the company guard has something consistent to check against.
-   The app sends the workbook back through postMessage.
+   PostMan opens the app WITH THE PLANT ALREADY NAMED, inside its own
+   window, and the app posts the workbook straight back.
 
-   Messages are accepted ONLY from an origin that is one of the app URLs
-   configured here. A page that can post into this window can otherwise
-   put anything it likes into a report somebody signs. */
-var HANDOFF = { open:null, app:null, status:null };
+   Embedded rather than a pop-up, because a pop-up is three things the
+   engineer has to manage - a blocker to allow, a window to find again, a
+   window to close - for no gain. In a panel the app is simply the next
+   screen.
 
-function openApp(a, statusFn){
-  var base = appUrl(a);
-  if (!base){ alert('No web address set for ' + a.name + ' yet.'); return; }
-  var q = [
+   A pop-up is still the fallback and always will be. Some sites refuse to
+   be framed, and an app that has not been updated can only post to an
+   opener. Every card offers both.
+
+   Either way, a message is read ONLY from an origin that is one of the app
+   URLs configured here. Anything that can post into this window could
+   otherwise put anything it likes into a report somebody signs. */
+var HANDOFF = { win:null, frame:null, app:null, status:null, alive:false };
+
+function handoffQuery(){
+  return [
     'from=postman',
     'origin=' + encodeURIComponent(location.origin),
     'company=' + encodeURIComponent(S.company.name || ''),
     'fy=' + encodeURIComponent(S.meta.financialYear || '')
   ].join('&');
-  var url = base + (base.indexOf('?') >= 0 ? '&' : '?') + q;
+}
+function appLaunchUrl(a){
+  var base = appUrl(a);
+  if (!base) return null;
+  return base + (base.indexOf('?') >= 0 ? '&' : '?') + handoffQuery();
+}
 
-  /* A file:// page has origin "null", so the app cannot post back to it
-     and this degrades to "open the app, download, drop the file". */
-  var canReceive = location.protocol === 'http:' || location.protocol === 'https:';
+/* A file:// page has origin "null": the app cannot post back to it, and a
+   framed cross-origin page cannot reach it either. There the only route is
+   export-and-drop, and saying so early is kinder than a panel that never
+   finishes. */
+function canReceiveHandoff(){
+  return location.protocol === 'http:' || location.protocol === 'https:';
+}
+
+function closeHandoff(){
+  HANDOFF.alive = false;
+  if (HANDOFF.frame && HANDOFF.frame.parentNode) HANDOFF.frame.parentNode.removeChild(HANDOFF.frame);
+  if (HANDOFF.win && !HANDOFF.win.closed){ try { HANDOFF.win.close(); } catch (e) {} }
+  HANDOFF.frame = null; HANDOFF.win = null; HANDOFF.app = null;
+  var host = document.getElementById('apppanel');
+  if (host) host.style.display = 'none';
+}
+
+/* The pop-up, kept as the escape hatch from the panel and used directly
+   when the browser will not frame the app. */
+function popApp(a, statusFn){
+  var url = appLaunchUrl(a);
+  if (!url){ alert('No web address set for ' + a.name + ' yet.'); return false; }
   var win = window.open(url, 'kisem-' + a.id);
   if (!win){
-    alert('The browser blocked the pop-up. Allow pop-ups for this page, or open ' + base +
-          ' yourself and drop the exported file here.');
+    alert('The browser blocked the pop-up.\n\nAllow pop-ups for this page, or open\n' +
+          appUrl(a) + '\nyourself and drop the exported file here.');
+    return false;
+  }
+  HANDOFF.win = win; HANDOFF.app = a; HANDOFF.status = statusFn || null;
+  if (statusFn) statusFn('Waiting for ' + a.name + ' to send its data back.');
+  return true;
+}
+
+function openApp(a, statusFn){
+  var url = appLaunchUrl(a);
+  if (!url){ alert('No web address set for ' + a.name + ' yet.'); return; }
+  if (!canReceiveHandoff()){
+    window.open(url, 'kisem-' + a.id);
+    if (statusFn) statusFn('Opened ' + a.name + '. This copy of PostMan is a local file, so the app ' +
+      'cannot hand data back - export from the app and drop the workbook here.');
     return;
   }
-  HANDOFF.open = win; HANDOFF.app = a; HANDOFF.status = statusFn || null;
-  if (statusFn) statusFn(canReceive
-    ? 'Waiting for ' + a.name + ' to send its data back… you can also just export and drop the file here.'
-    : 'Opened ' + a.name + '. This copy of PostMan is a local file, so the app cannot hand data back — ' +
-      'export from the app and drop the file here.');
+
+  closeHandoff();
+  HANDOFF.app = a; HANDOFF.status = statusFn || null;
+
+  var host = document.getElementById('apppanel');
+  var body = document.getElementById('apppanelbody');
+  document.getElementById('apppaneltitle').textContent = a.name + ' - ' + a.what;
+  var note = document.getElementById('apppanelnote');
+  note.textContent = 'Loading ' + a.name + '...';
+  note.className = 'panelnote';
+  host.style.display = 'flex';
+
+  var f = el('iframe');
+  f.src = url;
+  f.title = a.name;
+  f.setAttribute('allow', 'camera; geolocation');
+
+  /* `load` is NOT proof the app is running. A frame the browser refused
+     over X-Frame-Options fires `load` too, on its own error page, and
+     nothing cross-origin can be read to tell the two apart. Claiming
+     success here would put a green tick over a blank rectangle, so the
+     note says what is actually known and points at the way out. */
+  f.addEventListener('load', function(){
+    if (HANDOFF.alive) return;
+    note.textContent = a.name + ' should be showing below. Fill it in, then press Send to '
+      + 'PostMan there. If the panel is blank, the site refuses to be embedded - use '
+      + '"Open in a new window".';
+    note.className = 'panelnote';
+  });
+  body.appendChild(f);
+  HANDOFF.frame = f;
+  HANDOFF.alive = false;
+
+  if (statusFn) statusFn('');
 }
 
 function handoffOrigins(){
@@ -115,33 +188,118 @@ function handoffOrigins(){
   return out;
 }
 
+/* ---- what arrived, before it is taken in ---------------------------
+   An import used to happen the instant a message landed, announced by an
+   alert that was already too late to refuse. The workbook is now held,
+   read for what it contains, and shown: which plant, which app, how many
+   rows of what. Nothing enters the report until somebody presses the
+   button - which is the same standard the bill reader already holds, and
+   the reason a signed report can be defended. */
+var INBOX = null;
+
+function summarise(wb){
+  var det = detectWorkbook(wb), rows = [];
+  det.found.forEach(function(f){
+    var n = null;
+    try {
+      var sh = wb.Sheets[f.sheet];
+      if (sh){
+        var aoa = XLSX.utils.sheet_to_json(sh, { header:1, blankrows:false });
+        n = Math.max(0, aoa.length - 1);        /* minus the header row */
+      }
+    } catch (e) {}
+    rows.push({ label:f.label, sheet:f.sheet, n:n });
+  });
+  return rows;
+}
+
+function showInbox(app, wb){
+  var theirs = '';
+  try { theirs = workbookCompany(wb) || ''; } catch (e) {}
+  var ours = S.company.name || '';
+  INBOX = {
+    app: app, wb: wb, at: new Date(),
+    company: theirs,
+    mismatch: !!(theirs && ours && !sameCompany(theirs, ours)),
+    rows: summarise(wb)
+  };
+  S.active = 'sources';
+  save(); renderAll();
+}
+
+function acceptInbox(){
+  if (!INBOX) return;
+  var app = INBOX.app, wb = INBOX.wb;
+  try {
+    var log = importAny(wb);
+    INBOX = null;
+    save(); renderAll();
+    alert(app.name + ' data taken in:\n\n- ' + log.join('\n- '));
+  } catch (err){
+    INBOX = null;
+    renderAll();
+    alert(err.message);
+  }
+}
+function discardInbox(){ INBOX = null; renderAll(); }
+
 function onHandoffMessage(ev){
   var allowed = handoffOrigins();
   var app = allowed[ev.origin];
   if (!app) return;                       /* not one of ours - ignore silently */
   var d = ev.data;
-  if (!d || d.kind !== 'kisem-data' || !d.workbook) return;
+  if (!d) return;
 
-  var say = HANDOFF.status || function(){};
+  /* A greeting from a framed app: proof it rendered, which nothing on this
+     side can otherwise establish. Optional - an app that never sends one
+     still works, it just keeps the hedged wording. */
+  if (d.kind === 'kisem-hello'){
+    if (HANDOFF.frame && HANDOFF.app === app){
+      HANDOFF.alive = true;
+      var n = document.getElementById('apppanelnote');
+      if (n){
+        n.textContent = app.name + ' is open. Fill it in, then press Send to PostMan there.';
+        n.className = 'panelnote good';
+      }
+    }
+    return;
+  }
+  if (d.kind !== 'kisem-data' || !d.workbook) return;
+
   try {
     var bin = atob(String(d.workbook)), arr = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
     var wb = XLSX.read(arr, { type:'array' });
-    var log = importAny(wb);              /* the one reader, same as a dropped file */
-    save(); renderAll();
-    say('');
-    alert(app.name + ' sent its data:\n\n• ' + log.join('\n• '));
-    if (HANDOFF.open && !HANDOFF.open.closed) { try { HANDOFF.open.close(); } catch (e) {} }
+    closeHandoff();
+    showInbox(app, wb);                   /* held, not imported */
   } catch (err){
-    say('');
+    closeHandoff();
     alert('Could not read what ' + app.name + ' sent.\n\n' + err.message +
           '\n\nExport the workbook from the app and drop it here instead.');
   }
 }
 window.addEventListener('message', onHandoffMessage);
 
+/* The panel's own controls. Bound once, not per render, so a repaint of the
+   Data sources screen never leaves a second listener behind. */
+function bindAppPanel(){
+  var close = document.getElementById('apppanelclose');
+  var pop = document.getElementById('apppanelpop');
+  if (!close || close.dataset.bound) return;
+  close.dataset.bound = '1';
+  close.addEventListener('click', closeHandoff);
+  pop.addEventListener('click', function(){
+    var a = HANDOFF.app;
+    closeHandoff();
+    if (a) popApp(a, null);
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindAppPanel);
+else bindAppPanel();
+
 /* ---- the screen ----------------------------------------------------- */
 FORMS.sources = function(w){
+  if (INBOX) w.appendChild(inboxCard());
   var c = card('Where the data comes from',
     'Each app owns its own measurements and its own formulas. PostMan collects what they produced, ' +
     'prices it against one cost register and writes the report — it does not re-derive the physics. ' +
@@ -166,6 +324,12 @@ FORMS.sources = function(w){
     bar.appendChild(btn('Open ' + a.name, function(){
       openApp(a, function(t){ status.textContent = t; });
     }, 'primary'));
+    /* The window is not a lesser option, it is the one that works
+       everywhere - a site may refuse to be framed, and an app that has not
+       been updated for the panel can only post back to an opener. */
+    bar.appendChild(btn('Open in a new window', function(){
+      popApp(a, function(t){ status.textContent = t; });
+    }));
 
     var f = el('input'); f.type='file'; f.accept='.xlsx,.xls,.csv';
     f.addEventListener('change', function(){
@@ -211,3 +375,40 @@ FORMS.sources = function(w){
 
   w.appendChild(status);
 };
+
+/* What an app just sent, laid out so it can be refused. */
+function inboxCard(){
+  var box = el('div'); box.id = 'inbox';
+  box.appendChild(el('h4','', INBOX.app.name + ' sent a workbook'));
+
+  var when = INBOX.at.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
+  box.appendChild(el('p','', 'Received ' + when +
+    (INBOX.company ? ' \u00b7 ' + INBOX.company : ' \u00b7 no plant name in the file'))).className = 'meta';
+
+  if (INBOX.rows.length){
+    var ul = el('ul');
+    INBOX.rows.forEach(function(r){
+      ul.appendChild(el('li','', (r.n === null ? '' : r.n + ' \u00d7 ') + r.label +
+        (r.sheet ? ' (sheet "' + r.sheet + '")' : '')));
+    });
+    box.appendChild(ul);
+  } else {
+    box.appendChild(el('p','', 'Nothing in it was recognised. Taking it in will do nothing.'))
+      .className = 'meta';
+  }
+
+  /* The company guard fires on import too. Showing it here as well means
+     the answer is known before the button is pressed, not after. */
+  if (INBOX.mismatch){
+    var warn = el('p','', 'This workbook names a different plant from the report (' +
+      (S.company.name || 'unnamed') + '). Taking it in would mix two plants\u2019 measurements.');
+    warn.className = 'callout bad';
+    box.appendChild(warn);
+  }
+
+  var row = el('div'); row.className = 'row';
+  row.appendChild(btn('Take it in', acceptInbox, INBOX.mismatch ? '' : 'primary'));
+  row.appendChild(btn('Discard', discardInbox));
+  box.appendChild(row);
+  return box;
+}

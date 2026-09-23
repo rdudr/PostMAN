@@ -28,4 +28,18 @@
   <div id="work"></div>
   <div id="stage" class="report"><div class="stack" id="stack"></div></div>
 </div>
+<!-- The field app, embedded. Hidden until Data sources opens one; it
+     covers the working area rather than replacing it, so closing the panel
+     puts the engineer back exactly where they were. -->
+<div id="apppanel" aria-live="polite">
+  <div id="apppanelbar">
+    <span id="apppaneltitle"></span>
+    <span class="grow"></span>
+    <button class="btn ghost sm" id="apppanelpop">Open in a new window</button>
+    <button class="btn sm" id="apppanelclose">Close</button>
+  </div>
+  <p id="apppanelnote" class="panelnote"></p>
+  <div id="apppanelbody"></div>
+</div>
+
 <div id="measure" class="report" aria-hidden="true"></div>

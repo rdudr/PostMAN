@@ -1,10 +1,12 @@
 import base64, re, sys, os
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-# One build, two names: PostMan.html is the file people double-click and
-# share; index.html is the same bytes at the name Vercel serves.
-OUTS = [os.path.join(os.path.dirname(BASE), 'PostMan.html'),
-        os.path.join(os.path.dirname(BASE), 'index.html')]
+# ONE name. There used to be two - PostMan.html to double-click, index.html
+# for Vercel - and git tracked 1.2 MB of identical bytes twice, written twice
+# on every build. The hosted page is the product; anyone who wants a local
+# copy saves index.html from the browser and it works the same, because it
+# always was the same file.
+OUT = os.path.join(os.path.dirname(BASE), 'index.html')
 
 def rd(name):
     return open(os.path.join(BASE, name), encoding='utf-8').read()
@@ -78,7 +80,7 @@ for token, path in [('__SEAL__',  os.path.join(BRAND, 'iitgn-seal.png')),
     assert token not in doc, token
 assert all(ord(c) < 128 for c in doc), 'non-ASCII survived'
 
-for out_path in OUTS:
+for out_path in [OUT]:
     with open(out_path, 'w', encoding='utf-8', newline='\n') as fh:
         fh.write(doc)
     print('wrote %s  %.0f KB' % (out_path, len(doc.encode())/1024))
