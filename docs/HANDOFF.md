@@ -14,7 +14,7 @@ parser to keep in step and nothing new to break when a column is added.
 | FOX | `rdudr/fox-kisem` | Panels, motors, APFC, power quality | `https://fox-kisem.vercel.app/` | yes |
 | A-CMP | `rdudr/A-CMP` | Air compressor | `https://a-cmp.vercel.app/` | yes |
 | JET-Eff | `rdudr/Jet-EFF` | Jet machines | `https://jet-eff.vercel.app/` | not yet |
-| Thermo-X | `rdudr/-thermo-X` | Boiler, thermic fluid heater | `https://thermo-x-i7tl.vercel.app/` | not yet |
+| Thermo-X | `rdudr/-thermo-X` | Boiler, thermic fluid heater | `https://thermo-x-i7tl.vercel.app/` | yes |
 
 An app that does not send yet is not broken: PostMan still opens it with
 the plant named, and the engineer exports and drops the file as before.
