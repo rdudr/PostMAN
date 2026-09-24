@@ -829,7 +829,7 @@ function isACmpWorkbook(wb){
   if (!s) return false;
   return headersOf(wb, s).map(normKey).indexOf('machinetag') >= 0;
 }
-function importACmp(wb){
+function importACmp(wb, fileName){
   var log = [];
   var s = findSheet(wb, ACMP_SHEET) || findSheet(wb, 'A-CMP') || findSheet(wb, 'Compressors');
   var rows = s ? sheetRows(wb, s) : [];
@@ -858,6 +858,52 @@ function importACmp(wb){
       avgVelocity: num(pick(r,['fadAvgVelocity'])),
       pumpP1: num(pick(r,['pumpP1'])), pumpP2: num(pick(r,['pumpP2'])),
       pumpTime: num(pick(r,['pumpTimeSec'])), tankVol: tankVol,
+
+      /* Sept 2026: the pump-up is worked from the MAIN volume - the
+         receiver plus the pipe into it and the pipe out of it, each
+         measured with a tape around it. The app writes every part as well
+         as the total; all of it is carried so the report can show how the
+         figure was made up. */
+      pumpActive: /^(true|1|yes|y)$/i.test(String(pick(r,['pumpActive']) || '')),
+      fadActive: /^(true|1|yes|y)$/i.test(String(pick(r,['fadActive']) || '')),
+      pumpTankVolume: num(pick(r,['pumpTankVolume'])),
+      pumpTankVolumeUnit: pick(r,['pumpTankVolumeUnit']) || '',
+      pumpTankCalcMethod: pick(r,['pumpTankCalcMethod']) || '',
+      pumpTankDia: num(pick(r,['pumpTankDia'])), pumpTankLength: num(pick(r,['pumpTankLength'])), pumpTankPeri: num(pick(r,['pumpTankPeri'])),
+      pumpTankVolumeM3: num(pick(r,['pumpTankVolumeM3'])),
+      pumpInletPipeActive: /^(true|1|yes|y)$/i.test(String(pick(r,['pumpInletPipeActive']) || '')),
+      pumpInletPipePeri: num(pick(r,['pumpInletPipePeri'])), pumpInletPipePeriUnit: pick(r,['pumpInletPipePeriUnit']) || '',
+      pumpInletPipeLength: num(pick(r,['pumpInletPipeLength'])), pumpInletPipeLenUnit: pick(r,['pumpInletPipeLenUnit']) || '',
+      pumpInletPipeVolumeM3: num(pick(r,['pumpInletPipeVolumeM3'])),
+      pumpOutletPipeActive: /^(true|1|yes|y)$/i.test(String(pick(r,['pumpOutletPipeActive']) || '')),
+      pumpOutletPipePeri: num(pick(r,['pumpOutletPipePeri'])), pumpOutletPipePeriUnit: pick(r,['pumpOutletPipePeriUnit']) || '',
+      pumpOutletPipeLength: num(pick(r,['pumpOutletPipeLength'])), pumpOutletPipeLenUnit: pick(r,['pumpOutletPipeLenUnit']) || '',
+      pumpOutletPipeVolumeM3: num(pick(r,['pumpOutletPipeVolumeM3'])),
+      pumpMainVolumeM3: num(pick(r,['pumpMainVolumeM3'])),
+      pumpMainVolumeM3Calc: num(pick(r,['pumpMainVolumeM3Calc'])),
+      pumpActualFadM3Min: num(pick(r,['pumpActualFadM3Min'])),
+      pumpMeasuredPower: num(pick(r,['pumpMeasuredPower'])),
+      fadMeasuredPower: num(pick(r,['fadMeasuredPower'])),
+      loadPressure: num(pick(r,['loadPressure'])), unloadPressure: num(pick(r,['unloadPressure'])),
+
+      /* The lap table (pressure, time, energy meter) and the three-reading
+         hour meter arrive as JSON exactly as the app stores them. */
+      pumpLapData: pick(r,['pumpLapData']) || '',
+      luData: pick(r,['luData']) || '', luType: pick(r,['luType']) || '',
+
+      /* The anemometer traverse, so the report can show the readings the
+         average came from. */
+      fadAreaType: pick(r,['fadAreaType']) || '',
+      fadAreaL: num(pick(r,['fadAreaL'])), fadAreaB: num(pick(r,['fadAreaB'])),
+      fadAreaDia: num(pick(r,['fadAreaDia'])), fadAreaPeri: num(pick(r,['fadAreaPeri'])), fadAreaRadius: num(pick(r,['fadAreaRadius'])),
+      fadNumPoints: num(pick(r,['fadNumPoints'])), fadVelocities: pick(r,['fadVelocities']) || '',
+      fadAirDeliveryM3Sec: num(pick(r,['fadAirDeliveryM3Sec'])), fadAirDeliveryM3Hr: num(pick(r,['fadAirDeliveryM3Hr'])),
+      fadRunningPressure: num(pick(r,['fadRunningPressure'])),
+
+      ratedRpm: num(pick(r,['ratedRpm'])), ratedCurrent: num(pick(r,['ratedCurrent'])),
+      kva: num(pick(r,['kva'])), kvar: num(pick(r,['kvar'])), loadFactor: num(pick(r,['loadFactor'])),
+      genLoadVoltage: num(pick(r,['genLoadVoltage'])), genLoadAmp: num(pick(r,['genLoadAmp'])), genLoadPf: num(pick(r,['genLoadPf'])),
+      genUnloadVoltage: num(pick(r,['genUnloadVoltage'])), genUnloadAmp: num(pick(r,['genUnloadAmp'])), genUnloadPf: num(pick(r,['genUnloadPf'])),
       measuredKw: num(pick(r,['genLoadKw','measuredKw','pumpMeasuredPower','fadMeasuredPower'])),
       runningPressure: num(pick(r,[pumpCfm ? 'pumpRunningPressure' : 'fadRunningPressure','fadRunningPressure','pumpRunningPressure'])),
       loadHrs: num(pick(r,['luLoadHours'])), unloadHrs: num(pick(r,['luUnloadHours'])),
@@ -898,11 +944,17 @@ function importACmp(wb){
       ratedHp: num(pick(r,['ratedHp'])),
       starter: pick(r,['starterType']) || '',
       recordedBy: pick(r,['recordedBy']) || '',
+      /* The thermal survey, under the app's own nine names. */
       obsThermalImageNo: pick(r,['obsThermalImageNo']) || '',
+      obsCompSituation: num(pick(r,['obsCompSituation'])),
       obsCompDischarge: num(pick(r,['obsCompDischarge'])),
-      obsOilCooler: num(pick(r,['obsOilCooler'])),
-      obsAfterCooler: num(pick(r,['obsAfterCooler'])),
-      obsMotorBody: num(pick(r,['obsMotorBody'])),
+      obsOilSap: num(pick(r,['obsOilSap'])),
+      obsOilRadiatorIn: num(pick(r,['obsOilRadiatorIn'])),
+      obsOilRadiatorOut: num(pick(r,['obsOilRadiatorOut'])),
+      obsAirRadiatorIn: num(pick(r,['obsAirRadiatorIn'])),
+      obsAirRadiatorOut: num(pick(r,['obsAirRadiatorOut'])),
+      obsCompFinalDischarge: num(pick(r,['obsCompFinalDischarge'])),
+      obsCompMotor: num(pick(r,['obsCompMotor'])),
 
       obs: [pick(r,['description']), pick(r,['fadDescription']), pick(r,['pumpDescription'])]
              .filter(function(t){ return t; }).join(' ') };
@@ -913,6 +965,18 @@ function importACmp(wb){
   var keep = (S.compressor || []).filter(function(k){ return !incoming.some(function(n){ return normKey(n.tag) === normKey(k.tag); }); });
   S.compressor = keep.concat(incoming);
   S.enabled.compressor = true;
+  /* Who exported it and when, so a figure can be traced to a person. */
+  var by = '', exportDate = '';
+  var ps = findSheet(wb, 'Company Profile');
+  if (ps){
+    XLSX.utils.sheet_to_json(wb.Sheets[ps], { header:1 }).forEach(function(r2){
+      var key = normKey(r2 && r2[0]);
+      if (key === 'exportedby') by = String(r2[1] || '');
+      if (key === 'exportdate') exportDate = String(r2[1] || '');
+    });
+  }
+  if (!by) by = incoming.map(function(n){ return n.recordedBy; }).filter(Boolean)[0] || S.meta.preparedBy || '';
+  S.acmpUpload = { file:fileName || '', at:new Date().toLocaleString('en-IN'), by:by, exportDate:exportDate };
   log.push(incoming.length + ' compressor' + (incoming.length === 1 ? '' : 's') + ' from A-CMP');
 
   var drift = S.compressor.map(compressorCalc).filter(function(d){ return d.drift; }).length;
@@ -1184,7 +1248,7 @@ function coerce(v, t){
 /* Reads every sheet it recognises, ignores every sheet it does not. A
    workbook holding only a Lux sheet imports lux and touches nothing else,
    so partial data from a walkthrough is always safe to load. */
-function importModules(wb){
+function importModules(wb, fileName){
   var log = [], claimed = {};
   SHEETS.forEach(function(sp){
     var rows = sheetRows(wb, sp.name);
@@ -1221,7 +1285,7 @@ function importModules(wb){
   if (wb.Sheets['Jet Data'] || wb.Sheets['Company Profile'])
     log = log.concat(importJetEff(wb, claimed));
   if (wb.Sheets['Compressors'] === undefined && (wb.Sheets['Compressor Entries'] || wb.Sheets['A-CMP']))
-    log = log.concat(importACmp(wb));
+    log = log.concat(importACmp(wb, fileName));
   return log;
 }
 
@@ -1451,7 +1515,7 @@ function importAny(wb, fileName){
         !confirm('DIFFERENT COMPANY\n\nThis A-CMP file is for:\n    ' + theirsA + '\n\nThis report is for:\n    ' + oursA + '\n\nPress Cancel to stop.'))
       throw new Error('Import cancelled. That file belongs to ' + theirsA + ', not to this report.');
     if (theirsA && !oursA) S.company.name = theirsA;
-    var logA = importACmp(wb);
+    var logA = importACmp(wb, fileName);
     if (!logA.length) throw new Error('The A-CMP file was recognised but has no compressor rows.');
     if (theirsA) logA.push('company verified as ' + theirsA);
     return logA;
@@ -1495,7 +1559,7 @@ function importAny(wb, fileName){
     });
   }
 
-  log = log.concat(importModules(shim));
+  log = log.concat(importModules(shim, fileName));
   if (!log.length) throw new Error('The sheets were recognised but every row in them was empty.');
   if (theirs) log.push('company verified as ' + theirs);
   return log;

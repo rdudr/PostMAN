@@ -179,6 +179,7 @@ function blankState(){
            pcc:[], motors:[], apfc:[], motorNote:'', apfcNote:'', mains:[], mcc:[], foxUpload:null },
     pq:blankPq(),
     thermox:blankThermox(),
+    acmpUpload:null,
     tr:{ make:'', capacity:null, primaryV:null, secondaryV:null, impedance:null,
          noLoadLoss:null, loadLoss:null, oilQty:'', year:'', srNo:'',
          meterUnits:null, loading:null, stdEff:null, actualEff:null,

@@ -193,7 +193,9 @@ function compressorCalc(k){
   var designAirGen = num(k.designedAirGen);
   if (designAirGen === null) designAirGen = (ratedKw && ratedCFM) ? ratedCFM / ratedKw : null;
 
-  var isPump = k.testType === 'Pump-up';
+  /* Which test was done: a pump-up with a delivery figure wins over a
+     traverse, as A-CMP decides it on its own report. */
+  var isPump = k.testType === 'Pump-up' || (num(k.pumpActualFadCfm) !== null && !num(k.fadAirDeliveryCfm));
   var appCFM = isPump ? num(k.pumpActualFadCfm) : num(k.fadAirDeliveryCfm);
   var appSEC = num(k.fadActualSec);
   var appGen = num(k.fadActualAirGen);
@@ -203,9 +205,14 @@ function compressorCalc(k){
     var a = num(k.suctionArea), v = num(k.avgVelocity);
     if (a !== null && v !== null) ownCFM = a * v * 2118.88;        /* m3/s -> CFM */
   } else {
-    var p1 = num(k.pumpP1), p2 = num(k.pumpP2), t = num(k.pumpTime), vol = num(k.tankVol);
+    /* The air fills the receiver AND the pipe either side of it: A-CMP's
+       main volume, not the tank alone. Using the tank alone reads about a
+       tenth low on a typical installation. */
+    var p1 = num(k.pumpP1), p2 = num(k.pumpP2), t = num(k.pumpTime);
+    var vol = (typeof acMainVolume === 'function') ? acMainVolume(k).total : num(k.tankVol);
+    if (vol === null) vol = num(k.tankVol);
     if (p1 !== null && p2 !== null && t && vol){
-      ownCFM = ((p2 - p1) * vol * 60 / (1.01325 * t)) * 35.3147;
+      ownCFM = ((p2 - p1) * vol * 60 / (1.013 * t)) * 35.3147;
       var tf = num(k.pumpTempFactor);
       if (tf === null && num(k.pumpAirTemp) !== null) tf = 273 / (273 + num(k.pumpAirTemp));
       if (tf) ownCFM *= tf;
@@ -217,8 +224,11 @@ function compressorCalc(k){
   if (appCFM !== null && ownCFM !== null && appCFM > 0 &&
       Math.abs(appCFM - ownCFM) / appCFM > 0.03) drift = true;
 
-  var mkw = num(k.measuredKw);
-  if (mkw === null) mkw = num(k.genLoadKw);
+  /* The load reading first - it is what the machine draws making air -
+     then the test's own power meter. */
+  var mkw = num(k.genLoadKw);
+  if (mkw === null) mkw = num(k.measuredKw);
+  if (mkw === null) mkw = isPump ? num(k.pumpMeasuredPower) : num(k.fadMeasuredPower);
 
   var actualSEC = appSEC !== null ? appSEC : ((mkw && actualCFM) ? mkw / actualCFM : null);
   var actualAirGen = appGen !== null ? appGen : ((mkw && actualCFM) ? actualCFM / mkw : null);
@@ -235,7 +245,8 @@ function compressorCalc(k){
     ? unloadKw * hrs * (1 - loadPct / 100) * days : null;
   var annualKwh = (mkw && hrs) ? mkw * hrs * days : null;
 
-  return { ratedCFM:ratedCFM, designSEC:designSEC, designAirGen:designAirGen,
+  return { tested: appCFM !== null || ownCFM !== null,
+           ratedCFM:ratedCFM, designSEC:designSEC, designAirGen:designAirGen,
            actualCFM:actualCFM, actualSEC:actualSEC, actualAirGen:actualAirGen,
            appCFM:appCFM, ownCFM:ownCFM, drift:drift, testType:isPump ? 'Pump-up' : 'FAD',
            measuredKw:mkw, unloadKw:unloadKw,
