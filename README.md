@@ -149,7 +149,13 @@ beside the fields.
    not the mean of the monthly ratios; a low-output month would otherwise pull
    the year's figure about out of proportion to its energy.
 7. **Your own pages** — anything the generated sections cannot hold: photos,
-   tables, notes, placed wherever you want in the report.
+   tables, notes, placed wherever you want in the report. The same screen
+   holds the two print settings: the **Contents** page (every heading with
+   the page it starts on, each line a link to that page — it stays a link in
+   the PDF the browser saves), and **page breaks** — every chapter on a fresh
+   page, or just the two or three that matter, chosen from the list of
+   chapters the report actually has. Inside one of your own sections, a
+   "Start a new page here" block breaks wherever you like.
 8. **Print / PDF** — true A4, one page per page.
 
 ## Also in this folder

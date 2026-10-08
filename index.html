@@ -453,7 +453,7 @@ function thisFY(){
 function blankState(){
   return {
     active:'cover',
-    meta:{ reportType:'detailed', financialYear:thisFY(), serial:1, revision:'First Draft', toc:true,
+    meta:{ reportType:'detailed', financialYear:thisFY(), serial:1, revision:'First Draft', toc:true, breakChapters:false, breakAt:{},
            reportDate:new Date().toISOString().slice(0,10),
            assessFrom:'', assessTo:'', preparedBy:'' },
     company:{ name:'', addr1:'', addr2:'', district:'', state:'', pincode:'',
@@ -9563,7 +9563,33 @@ function spliceCustom(B){
     }
     out.push(b);
   });
-  return out.filter(function(b){ return b.node; });
+  return chapterBreaks(out.filter(function(b){ return b.node; }));
+}
+
+/* Every chapter title in the order it prints, read off the stream itself,
+   so the page-break list on screen is always the report as it stands and
+   never a hand-kept duplicate of it. */
+var CHAPTER_TITLES = [];
+/* "Start this chapter on a new page" - globally, or one chapter at a time.
+   A break before the very first chapter would only make a blank page, and
+   one already standing in front of a chapter is not doubled. */
+function chapterBreaks(blocks){
+  var titles = [], out = [], seen = 0;
+  blocks.forEach(function(b){
+    var d = b.node && b.node.dataset;
+    var isChapter = d && d.toc === '1' && d.toctext;
+    if (isChapter){
+      titles.push(d.toctext);
+      var want = S.meta.breakChapters || (S.meta.breakAt && S.meta.breakAt[d.toctext]);
+      var prev = out[out.length - 1];
+      if (want && seen > 0 && !(prev && prev.hardBreak))
+        out.push({ node:el('div'), split:false, hardBreak:true });
+      seen++;
+    }
+    out.push(b);
+  });
+  CHAPTER_TITLES = titles;
+  return out;
 }
 
 /* ---- table of contents ------------------------------------------- */
@@ -9575,16 +9601,21 @@ function buildTocBlocks(entries){
   out.push(blk(bP('Every heading in this report, with the page it starts on.', { size:9.5, italic:true })));
   entries.forEach(function(e){
     var lvl = Number(e.level);
-    var row = el('div','display:flex;align-items:baseline;gap:' + px(4) +
+    /* An anchor, not a div: the browser's own Save as PDF keeps an
+       internal link, so the contents of the printed report is clickable
+       for anyone reading it on a screen. It still looks like a line of
+       text - no underline, no link colour. */
+    var row = el(e.page === null ? 'div' : 'a','display:flex;align-items:baseline;gap:' + px(4) +
       ';margin:0 0 ' + px(lvl === 1 ? 3 : 1.5) + ';padding-left:' + px(lvl === 1 ? 0 : 12) +
-      ';font-size:' + px(lvl === 1 ? 10 : 9.3) + ';' +
+      ';font-size:' + px(lvl === 1 ? 10 : 9.3) + ';text-decoration:none;' +
       (lvl === 1 ? 'font-weight:600;color:' + C.navy + ';' : 'color:' + C.charcoal + ';'));
+    if (e.page !== null) row.href = '#pg-' + e.page;
     row.appendChild(el('span','flex:0 1 auto;', e.text));
     row.appendChild(el('span','flex:1 1 auto;border-bottom:' + px(0.6) + ' dotted ' + C.rule +
       ';transform:translateY(' + px(-2) + ');min-width:' + px(10)));
     row.appendChild(el('span','flex:0 0 auto;font-family:' + F.mono + ';font-size:' + px(8.6) +
       ';color:' + C.ink3 + ';', e.page === null ? '\u2014' : String(e.page)));
-    /* Clickable in the on-screen preview; inert, and identical, in print. */
+    /* The same destination for the on-screen smooth scroll. */
     if (e.page !== null){ row.dataset.gotopage = e.page; row.style.cursor = 'pointer'; }
     out.push(blk(row));
   });
@@ -9657,11 +9688,38 @@ function paginateWithToc(){
 FORMS.custom = function(w){
   var c = card('Your own pages',
     'Anything the generated sections cannot hold. Write it here, drop photographs in, and choose where in the report it belongs \u2014 it paginates, splits and prints exactly like a generated section, because it goes through the same builders.');
-  c.appendChild(fCheck(S.meta, 'toc', 'Include a Contents page (headings and their page numbers)'));
+  c.appendChild(fCheck(S.meta, 'toc', 'Include a Contents page (headings and their page numbers, each one a link to its page)'));
   c.appendChild(btn('+ Add a section', function(){
     S.custom.push(newCustomSection()); save(); renderAll();
   }));
   w.appendChild(c);
+
+  /* ---- page breaks ------------------------------------------------
+     A chapter that starts halfway down a page reads as a continuation of
+     the one above it. This is where that is settled: all of them at once,
+     or the two or three that matter. The list is the report as it stands,
+     read off the last build, so a chapter switched on this morning is
+     here this afternoon without anyone maintaining a list. */
+  var cb = card('Page breaks',
+    'Where a chapter should start on a fresh page. A break before the first chapter would only make a blank page, so it is never added there, and a chapter that already begins a page is left alone.');
+  cb.appendChild(fCheck(S.meta, 'breakChapters', 'Start every chapter on a new page'));
+  if (!S.meta.breakChapters){
+    if (!S.meta.breakAt) S.meta.breakAt = {};
+    var titles = CHAPTER_TITLES.slice();
+    if (!titles.length) cb.appendChild(el('p','', 'The chapter list appears once the report has been drawn.')).className = 'callout';
+    else {
+      var list = el('div','display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 16px;margin-top:8px;');
+      titles.forEach(function(t, i){
+        var row = fCheck(S.meta.breakAt, t, (i === 0 ? '1. ' : (i + 1) + '. ') + t);
+        if (i === 0){ row.style.opacity = '.45'; row.querySelector('input').disabled = true; row.title = 'The first chapter already starts a page.'; }
+        list.appendChild(row);
+      });
+      cb.appendChild(list);
+    }
+  }
+  cb.appendChild(el('p','margin-top:8px;font-size:12px;color:var(--ink-3);',
+    'Inside one of your own sections, add a "Start a new page here" block to break wherever you like.'));
+  w.appendChild(cb);
 
   if (!S.custom.length){
     var e = card('Nothing added yet',
@@ -11274,26 +11332,28 @@ function drawPreview(){
   var pages = built.pages;
 
   clear(stack);
-  function shell(node){
+  function shell(node, id){
     var wrap = el('div','width:' + W + 'px;height:' + H + 'px;background:#fff;overflow:hidden;');
     wrap.className = 'pagewrap';
+    /* The target of a contents link, on screen and in the printed PDF. */
+    if (id) wrap.id = id;
     var sc = el('div','transform:scale(' + zoom + ');');
     sc.className = 'scaler';
     sc.appendChild(node);
     wrap.appendChild(sc);
     stack.appendChild(wrap);
   }
-  shell(renderCover());
-  pages.forEach(function(content, i){ shell(renderPage(i+1, content, guides)); });
+  shell(renderCover(), 'pg-cover');
+  pages.forEach(function(content, i){ shell(renderPage(i+1, content, guides), 'pg-' + (i + PAGE_BADGE_OFFSET)); });
 
   /* A contents line is a real link on screen and plain text on paper. */
   stack.addEventListener('click', function(ev){
     var t = ev.target;
     while (t && t !== stack && !(t.dataset && t.dataset.gotopage)) t = t.parentNode;
     if (!t || t === stack) return;
-    var wraps = stack.querySelectorAll('.pagewrap');
-    var idx = parseInt(t.dataset.gotopage, 10) - 1;
-    if (wraps[idx]) wraps[idx].scrollIntoView({ behavior:'smooth', block:'start' });
+    /* The badge number IS the id: no index arithmetic to get wrong. */
+    var page = document.getElementById('pg-' + t.dataset.gotopage);
+    if (page) page.scrollIntoView({ behavior:'smooth', block:'start' });
   });
 
   /* Belt and braces. The flow engine should make this impossible, but a

@@ -391,26 +391,28 @@ function drawPreview(){
   var pages = built.pages;
 
   clear(stack);
-  function shell(node){
+  function shell(node, id){
     var wrap = el('div','width:' + W + 'px;height:' + H + 'px;background:#fff;overflow:hidden;');
     wrap.className = 'pagewrap';
+    /* The target of a contents link, on screen and in the printed PDF. */
+    if (id) wrap.id = id;
     var sc = el('div','transform:scale(' + zoom + ');');
     sc.className = 'scaler';
     sc.appendChild(node);
     wrap.appendChild(sc);
     stack.appendChild(wrap);
   }
-  shell(renderCover());
-  pages.forEach(function(content, i){ shell(renderPage(i+1, content, guides)); });
+  shell(renderCover(), 'pg-cover');
+  pages.forEach(function(content, i){ shell(renderPage(i+1, content, guides), 'pg-' + (i + PAGE_BADGE_OFFSET)); });
 
   /* A contents line is a real link on screen and plain text on paper. */
   stack.addEventListener('click', function(ev){
     var t = ev.target;
     while (t && t !== stack && !(t.dataset && t.dataset.gotopage)) t = t.parentNode;
     if (!t || t === stack) return;
-    var wraps = stack.querySelectorAll('.pagewrap');
-    var idx = parseInt(t.dataset.gotopage, 10) - 1;
-    if (wraps[idx]) wraps[idx].scrollIntoView({ behavior:'smooth', block:'start' });
+    /* The badge number IS the id: no index arithmetic to get wrong. */
+    var page = document.getElementById('pg-' + t.dataset.gotopage);
+    if (page) page.scrollIntoView({ behavior:'smooth', block:'start' });
   });
 
   /* Belt and braces. The flow engine should make this impossible, but a
