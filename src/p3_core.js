@@ -153,7 +153,7 @@ function thisFY(){
 function blankState(){
   return {
     active:'cover',
-    meta:{ reportType:'detailed', financialYear:thisFY(), serial:1, revision:'First Draft', toc:true, breakChapters:false, breakAt:{},
+    meta:{ reportType:'detailed', financialYear:thisFY(), serial:1, revision:'First Draft', toc:true, breakChapters:false, breakAt:{}, breakShowSubs:false,
            reportDate:new Date().toISOString().slice(0,10),
            assessFrom:'', assessTo:'', preparedBy:'' },
     company:{ name:'', addr1:'', addr2:'', district:'', state:'', pincode:'',

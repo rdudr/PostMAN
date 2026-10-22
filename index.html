@@ -453,7 +453,7 @@ function thisFY(){
 function blankState(){
   return {
     active:'cover',
-    meta:{ reportType:'detailed', financialYear:thisFY(), serial:1, revision:'First Draft', toc:true, breakChapters:false, breakAt:{},
+    meta:{ reportType:'detailed', financialYear:thisFY(), serial:1, revision:'First Draft', toc:true, breakChapters:false, breakAt:{}, breakShowSubs:false,
            reportDate:new Date().toISOString().slice(0,10),
            assessFrom:'', assessTo:'', preparedBy:'' },
     company:{ name:'', addr1:'', addr2:'', district:'', state:'', pincode:'',
@@ -9566,29 +9566,50 @@ function spliceCustom(B){
   return chapterBreaks(out.filter(function(b){ return b.node; }));
 }
 
-/* Every chapter title in the order it prints, read off the stream itself,
-   so the page-break list on screen is always the report as it stands and
-   never a hand-kept duplicate of it. */
-var CHAPTER_TITLES = [];
-/* "Start this chapter on a new page" - globally, or one chapter at a time.
-   A break before the very first chapter would only make a blank page, and
-   one already standing in front of a chapter is not doubled. */
+/* Every heading in the order it prints - chapter, topic and sub-topic -
+   read off the stream itself, so the page-break list on screen is always
+   the report as it stands and never a hand-kept duplicate of it. */
+var REPORT_HEADINGS = [];
+/* A heading is addressed by its level and its words. Two topics in
+   different chapters can share a title ("Measured at the panel" sits under
+   every panel), and ticking it means every one of them starts a page -
+   which is what somebody asking for that topic on its own page means. */
+function headingKey(level, text){ return level + '|' + text; }
+function wantsBreak(level, text){
+  if (level === 1 && S.meta.breakChapters) return true;
+  var at = S.meta.breakAt || {};
+  /* Keys were plain chapter titles before topics could be broken. */
+  return !!(at[headingKey(level, text)] || (level === 1 && at[text] === true));
+}
+/* "Start this topic on a new page". A break before the very first heading
+   would only make a blank page, and one already standing in front of a
+   heading is not doubled. */
 function chapterBreaks(blocks){
-  var titles = [], out = [], seen = 0;
+  var heads = [], out = [], seen = 0;
   blocks.forEach(function(b){
     var d = b.node && b.node.dataset;
-    var isChapter = d && d.toc === '1' && d.toctext;
-    if (isChapter){
-      titles.push(d.toctext);
-      var want = S.meta.breakChapters || (S.meta.breakAt && S.meta.breakAt[d.toctext]);
+    var lvl = d && d.toc ? Number(d.toc) : 0;
+    if (lvl && d.toctext){
+      heads.push({ level:lvl, text:d.toctext, key:headingKey(lvl, d.toctext) });
       var prev = out[out.length - 1];
-      if (want && seen > 0 && !(prev && prev.hardBreak))
+      if (wantsBreak(lvl, d.toctext) && seen > 0 && !(prev && prev.hardBreak))
         out.push({ node:el('div'), split:false, hardBreak:true });
       seen++;
     }
     out.push(b);
   });
-  CHAPTER_TITLES = titles;
+  REPORT_HEADINGS = heads;
+  return out;
+}
+/* The list for the screen: one row per distinct heading, in print order,
+   each one carrying how many times it occurs so a repeated topic says so. */
+function breakChoices(){
+  var seen = {}, out = [];
+  REPORT_HEADINGS.forEach(function(h){
+    if (seen[h.key]){ seen[h.key].count++; return; }
+    seen[h.key] = { level:h.level, text:h.text, key:h.key, count:1, first:out.length === 0 };
+    out.push(seen[h.key]);
+  });
   return out;
 }
 
@@ -9695,30 +9716,45 @@ FORMS.custom = function(w){
   w.appendChild(c);
 
   /* ---- page breaks ------------------------------------------------
-     A chapter that starts halfway down a page reads as a continuation of
-     the one above it. This is where that is settled: all of them at once,
-     or the two or three that matter. The list is the report as it stands,
-     read off the last build, so a chapter switched on this morning is
-     here this afternoon without anyone maintaining a list. */
+     A topic that starts halfway down a page reads as a continuation of
+     the one above it. This is where that is settled: every chapter at
+     once, or the particular topics that matter. The list is the report as
+     it stands, read off the last build, so a chapter switched on this
+     morning is here this afternoon without anyone maintaining a list. */
   var cb = card('Page breaks',
-    'Where a chapter should start on a fresh page. A break before the first chapter would only make a blank page, so it is never added there, and a chapter that already begins a page is left alone.');
+    'Which topic starts on a fresh page. Chapters are the headings in capitals, topics sit under them, sub-topics under those \u2014 tick the one you want to open a page. A break before the very first heading would only make a blank page, so it is never added there, and a topic that already begins a page is left alone.');
   cb.appendChild(fCheck(S.meta, 'breakChapters', 'Start every chapter on a new page'));
-  if (!S.meta.breakChapters){
-    if (!S.meta.breakAt) S.meta.breakAt = {};
-    var titles = CHAPTER_TITLES.slice();
-    if (!titles.length) cb.appendChild(el('p','', 'The chapter list appears once the report has been drawn.')).className = 'callout';
-    else {
-      var list = el('div','display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 16px;margin-top:8px;');
-      titles.forEach(function(t, i){
-        var row = fCheck(S.meta.breakAt, t, (i === 0 ? '1. ' : (i + 1) + '. ') + t);
-        if (i === 0){ row.style.opacity = '.45'; row.querySelector('input').disabled = true; row.title = 'The first chapter already starts a page.'; }
-        list.appendChild(row);
-      });
-      cb.appendChild(list);
-    }
+  if (!S.meta.breakAt) S.meta.breakAt = {};
+  var choices = breakChoices();
+  if (!choices.length){
+    cb.appendChild(el('p','', 'The list appears once the report has been drawn.')).className = 'callout';
+  } else {
+    var subs = choices.filter(function(h){ return h.level === 3; }).length;
+    if (subs) cb.appendChild(fCheck(S.meta, 'breakShowSubs', 'Also list the ' + subs + ' sub-topics'));
+    var list = el('div','margin-top:8px;columns:2;column-gap:20px;');
+    choices.forEach(function(h){
+      if (h.level === 3 && !S.meta.breakShowSubs) return;
+      /* A chapter already broken by the global switch is shown ticked and
+         left alone, so the two controls never contradict each other. */
+      var forced = h.level === 1 && S.meta.breakChapters;
+      var label = (h.level === 1 ? '' : h.level === 2 ? '\u00A0\u00A0\u00B7 ' : '\u00A0\u00A0\u00A0\u00A0\u00B7\u00B7 ') +
+        h.text + (h.count > 1 ? '  (' + h.count + ' places)' : '');
+      var row = fCheck(S.meta.breakAt, h.key, label);
+      row.style.cssText += 'break-inside:avoid;padding:1px 0;' +
+        (h.level === 1 ? 'font-weight:600;margin-top:6px;' : 'font-size:12.5px;color:var(--ink-2);');
+      var input = row.querySelector('input');
+      if (h.first || forced){
+        input.disabled = true;
+        if (forced) input.checked = true;
+        row.style.opacity = '.5';
+        row.title = forced ? 'Every chapter is already starting a new page.' : 'The first heading already starts a page.';
+      }
+      list.appendChild(row);
+    });
+    cb.appendChild(list);
   }
   cb.appendChild(el('p','margin-top:8px;font-size:12px;color:var(--ink-3);',
-    'Inside one of your own sections, add a "Start a new page here" block to break wherever you like.'));
+    'A topic that appears in several places \u2014 one per panel, one per machine \u2014 breaks at every one of them. Inside one of your own sections, add a "Start a new page here" block to break wherever you like.'));
   w.appendChild(cb);
 
   if (!S.custom.length){

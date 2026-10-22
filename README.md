@@ -153,8 +153,10 @@ beside the fields.
    holds the two print settings: the **Contents** page (every heading with
    the page it starts on, each line a link to that page — it stays a link in
    the PDF the browser saves), and **page breaks** — every chapter on a fresh
-   page, or just the two or three that matter, chosen from the list of
-   chapters the report actually has. Inside one of your own sections, a
+   page, or any single topic or sub-topic, ticked from the report's own
+   outline (chapters, the topics under them, the sub-topics under those,
+   read off the report as it stands). A topic that appears in several
+   places — one per panel, one per machine — breaks at every one of them. Inside one of your own sections, a
    "Start a new page here" block breaks wherever you like.
 8. **Print / PDF** — true A4, one page per page.
 
