@@ -152,8 +152,10 @@ beside the fields.
    tables, notes, placed wherever you want in the report. The same screen
    holds the two print settings: the **Contents** page (every heading with
    the page it starts on, each line a link to that page — it stays a link in
-   the PDF the browser saves), and **page breaks** — every chapter on a fresh
-   page, or any single topic or sub-topic, ticked from the report's own
+   the PDF the browser saves), and **page breaks** — every chapter opens a
+   fresh page (that is the default: two chapters on one sheet read as one
+   long section with a bold line in the middle), and on top of that any
+   single topic or sub-topic can open one too, ticked from the report's own
    outline (chapters, the topics under them, the sub-topics under those,
    read off the report as it stands). A topic that appears in several
    places — one per panel, one per machine — breaks at every one of them. Inside one of your own sections, a

@@ -153,7 +153,12 @@ function thisFY(){
 function blankState(){
   return {
     active:'cover',
-    meta:{ reportType:'detailed', financialYear:thisFY(), serial:1, revision:'First Draft', toc:true, breakChapters:false, breakAt:{}, breakShowSubs:false,
+    meta:{ reportType:'detailed', financialYear:thisFY(), serial:1, revision:'First Draft', toc:true,
+           /* A chapter is a chapter: it opens a page. Two of them on one sheet
+              reads as one long section with a bold line in the middle, which is
+              how Acknowledgement and Preface used to arrive. Switch it off on
+              the Your own pages screen for a short walkthrough report. */
+           breakChapters:true, breakAt:{}, breakShowSubs:false,
            reportDate:new Date().toISOString().slice(0,10),
            assessFrom:'', assessTo:'', preparedBy:'' },
     company:{ name:'', addr1:'', addr2:'', district:'', state:'', pincode:'',
@@ -241,7 +246,22 @@ function loadState(){
     if (!raw) return;
     var parsed = JSON.parse(raw);
     S = deepMerge(blankState(), parsed);
+    migrateState();
   } catch (e) { /* private window or blocked storage - start clean */ }
+}
+/* Drafts carry the defaults they were saved under. A default that CHANGES
+   therefore needs a one-time nudge, or a report started last week keeps
+   printing the old way for ever with no way for its owner to know why.
+   Bump BREAK_RULE when the page-break default changes again. */
+var BREAK_RULE = 2;
+/* breakRule is deliberately absent from blankState: deepMerge fills a
+   missing key from the blank state, so carrying it there would stamp
+   every old draft as already migrated. */
+function migrateState(){
+  if (S.meta.breakRule !== BREAK_RULE){
+    S.meta.breakChapters = true;     /* every chapter opens a page */
+    S.meta.breakRule = BREAK_RULE;
+  }
 }
 function deepMerge(base, over){
   if (over === null || over === undefined) return base;
