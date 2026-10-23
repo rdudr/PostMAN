@@ -47,9 +47,13 @@ beside the fields.
    layout — the reader turns the page clockwise — followed by the standard
    summary, load factors, charts, and the PF and contract-demand proposals.
    Rates not printed on a bill are derived from its charges and marked so.
-2a. **Bill capture & verify** — drop in bill PDFs or photographs. Figures are
-   read out automatically and shown beside the bill itself; check each one and
-   press Verify. Nothing counts until a person has looked at it.
+2a. **Bill capture & verify** — drop in bill PDFs or photographs. A DISCOM
+   bill that runs to three sheets stays one bill: the pages of a PDF are
+   grouped by the month they name, the figures are read from whichever sheet
+   carries them, and the others are a click away on the same screen. Figures
+   are read out automatically and shown beside the bill itself; check each one
+   and press Verify. Nothing counts until a person has looked at it. A wrong
+   file is undone with Clear this bill, Delete this month, or Start over.
 3. **Import field data** — one door for every workbook. JET-Eff, A-CMP, the
    FOX KISEM export, a PQ-analyser "PostMan export", or the module workbook
    you can download from that screen and take to site. The file is

@@ -123,6 +123,109 @@ function acUploadStamp(){
 function acPct(v){ return v === null || v === undefined || !isFinite(v) ? '—' : (v >= 0 ? '+' : '') + fix(v, 1) + ' %'; }
 function acUnit(v, d, unit){ return num(v) === null ? '—' : fix(num(v), d) + (unit ? ' ' + unit : ''); }
 
+/* The suction port, drawn. A velocity traverse means nothing without the
+   duct it was taken across: this shows the cross-section to scale, its
+   dimensions as the engineer entered them, and where the readings were
+   taken, so a reader can see that the traverse covered the port rather
+   than one convenient corner of it. */
+function acPortDiagram(k, perf){
+  var w = LIVE.w, h = 150;
+  var svg = sv('svg', { viewBox:'0 0 ' + w + ' ' + h, width:'100%', style:'display:block' });
+  svg.appendChild(svText(8, 12, 'Suction port and traverse', { anchor:'start', size:9, weight:600, fill:C.charcoal }));
+  var type = k.fadAreaType || (num(k.fadAreaDia) !== null || num(k.fadAreaRadius) !== null || num(k.fadAreaPeri) !== null ? 'Circle' : 'Direct');
+  var area = num(k.suctionArea);
+  var cx = 86, cy = 86, box = 54;   /* the drawing is schematic, not to scale across types */
+  var vels = acJson(k.fadVelocities, []).map(num).filter(function(v){ return v !== null; });
+  var pts = [];
+  if (type === 'Rectangle'){
+    var L = num(k.fadAreaL) || 0, Bm = num(k.fadAreaB) || 0;
+    var ratio = (L && Bm) ? Math.min(2.2, Math.max(0.45, L / Bm)) : 1.4;
+    var bw = ratio >= 1 ? box * 1.6 : box * 1.6 * ratio, bh = ratio >= 1 ? (box * 1.6) / ratio : box * 1.6;
+    svg.appendChild(sv('rect', { x:cx - bw/2, y:cy - bh/2, width:bw, height:bh, fill:'#F1F5FA', stroke:C.navy, 'stroke-width':1.3 }));
+    svg.appendChild(svText(cx, cy - bh/2 - 5, (L ? fix(L, 0) + ' mm' : 'length'), { size:7, fill:C.ink3 }));
+    svg.appendChild(svText(cx - bw/2 - 6, cy, (Bm ? fix(Bm, 0) + ' mm' : 'width'), { anchor:'end', size:7, fill:C.ink3 }));
+    /* Points across the port, in the grid an engineer actually walks. */
+    var n = vels.length || num(k.fadNumPoints) || 0;
+    var cols = Math.ceil(Math.sqrt(n)) || 1, rows = Math.ceil(n / cols) || 1;
+    for (var i = 0; i < n; i++){
+      var r = Math.floor(i / cols), c2 = i % cols;
+      pts.push([cx - bw/2 + bw * (c2 + 0.5) / cols, cy - bh/2 + bh * (r + 0.5) / rows]);
+    }
+  } else if (type === 'Circle'){
+    var dia = num(k.fadAreaDia), rad = num(k.fadAreaRadius), peri = num(k.fadAreaPeri);
+    var rr = box * 0.9;
+    svg.appendChild(sv('circle', { cx:cx, cy:cy, r:rr, fill:'#F1F5FA', stroke:C.navy, 'stroke-width':1.3 }));
+    svg.appendChild(sv('line', { x1:cx - rr, x2:cx + rr, y1:cy, y2:cy, stroke:C.rule, 'stroke-width':0.8, 'stroke-dasharray':'3 3' }));
+    var lbl = dia !== null ? 'dia ' + fix(dia, 3) + ' m' : rad !== null ? 'radius ' + fix(rad, 3) + ' m' : peri !== null ? 'perimeter ' + fix(peri, 3) + ' m' : '';
+    if (lbl) svg.appendChild(svText(cx, cy - rr - 5, lbl, { size:7, fill:C.ink3 }));
+    var n2 = vels.length || num(k.fadNumPoints) || 0;
+    /* Readings on a round duct are taken along two diameters. */
+    for (var j = 0; j < n2; j++){
+      var half = Math.ceil(n2 / 2);
+      var along = (j % half + 0.5) / half * 2 - 1;      /* -1 .. 1 */
+      var onX = j < half;
+      pts.push([cx + (onX ? along * rr * 0.82 : 0), cy + (onX ? 0 : along * rr * 0.82)]);
+    }
+  } else {
+    svg.appendChild(sv('rect', { x:cx - box, y:cy - box * 0.7, width:box * 2, height:box * 1.4, fill:'#F1F5FA', stroke:C.navy, 'stroke-width':1.3, 'stroke-dasharray':'4 3' }));
+    svg.appendChild(svText(cx, cy, 'area entered directly', { size:7, fill:C.ink3 }));
+  }
+  /* A point is drawn the size of its reading, so a slow corner shows. */
+  var vmax = vels.length ? Math.max.apply(null, vels) : 1;
+  pts.forEach(function(p, i){
+    var v = vels[i];
+    var rr2 = v === undefined ? 2 : 1.6 + 2.6 * (v / (vmax || 1));
+    svg.appendChild(sv('circle', { cx:p[0], cy:p[1], r:rr2, fill:SERIES[0], 'fill-opacity':0.75 }));
+  });
+  /* The working, beside the picture. */
+  var lines = [
+    ['Port', type === 'Rectangle' ? 'rectangular duct' : type === 'Circle' ? 'round duct' : 'area entered directly'],
+    ['Suction area', (area === null ? '—' : fix(area, 4) + ' m²') +
+      (type === 'Rectangle' && num(k.fadAreaL) && num(k.fadAreaB) ? '  =  ' + fix(num(k.fadAreaL) / 1000, 3) + ' × ' + fix(num(k.fadAreaB) / 1000, 3) + ' m' : '') +
+      (type === 'Circle' && num(k.fadAreaPeri) ? '  =  perimeter² ÷ 4π' : '') +
+      (type === 'Circle' && num(k.fadAreaDia) ? '  =  π × (dia ÷ 2)²' : '')],
+    ['Traverse', (vels.length ? vels.length + ' points' : 'not recorded') +
+      (vels.length ? ', ' + fix(Math.min.apply(null, vels), 1) + ' to ' + fix(vmax, 1) + ' m/s' : '')],
+    ['Average velocity', acUnit(k.avgVelocity, 2, 'm/s')],
+    ['Air delivery', acUnit(k.fadAirDeliveryM3Sec, 4, 'm³/s') + '  =  area × velocity'],
+    ['', acUnit(k.fadAirDeliveryCfm, 1, 'CFM') + '  =  m³/s × 2118.88']
+  ];
+  lines.forEach(function(l, i){
+    var y = 34 + i * 17;
+    if (l[0]) svg.appendChild(svText(184, y, l[0], { anchor:'start', size:7.4, fill:C.ink3 }));
+    svg.appendChild(svText(268, y, l[1], { anchor:'start', size:8, fill:C.charcoal, mono:true }));
+  });
+  return svg;
+}
+
+/* The pump-up volume, drawn: the receiver and the two pipe runs that fill
+   with it, in proportion, because a reader who cannot see the make-up
+   cannot judge the delivery figure that comes out of it. */
+function acVolumeDiagram(k, mv){
+  var w = LIVE.w, h = 112;
+  var svg = sv('svg', { viewBox:'0 0 ' + w + ' ' + h, width:'100%', style:'display:block' });
+  svg.appendChild(svText(8, 12, 'Main volume — what the air fills', { anchor:'start', size:9, weight:600, fill:C.charcoal }));
+  var parts = [['Receiver', mv.tank, SERIES[0]], ['Inlet pipe', mv.inlet, SERIES[1]], ['Outlet pipe', mv.outlet, SERIES[3]]]
+                .filter(function(p){ return p[1] !== null && p[1] > 0; });
+  var total = mv.total || parts.reduce(function(a, p){ return a + p[1]; }, 0);
+  if (!total) return svg;
+  /* The compressor, the pipe in, the receiver, the pipe out. */
+  var y0 = 40, bw = w - 120, x = 96;
+  svg.appendChild(sv('rect', { x:14, y:y0 + 4, width:62, height:30, rx:3, fill:'#F1F5FA', stroke:C.navy, 'stroke-width':1.2 }));
+  svg.appendChild(svText(45, y0 + 23, 'compressor', { size:7.2, fill:C.charcoal }));
+  parts.forEach(function(p){
+    var pw = Math.max(6, (p[1] / total) * bw);
+    svg.appendChild(sv('rect', { x:x, y:y0, width:pw - 2, height:38, rx:2, fill:p[2], 'fill-opacity':0.82 }));
+    svg.appendChild(svText(x + pw / 2 - 1, y0 + 23, fix((p[1] / total) * 100, 0) + ' %', { size:7.4, fill:'#fff', weight:600 }));
+    svg.appendChild(svText(x + pw / 2 - 1, y0 + 50, p[0], { size:7, fill:C.ink3 }));
+    svg.appendChild(svText(x + pw / 2 - 1, y0 + 60, fix(p[1], 3) + ' m³', { size:6.8, fill:C.ink3, mono:true }));
+    x += pw;
+  });
+  svg.appendChild(svText(8, 92, 'Main volume ' + fix(total, 3) + ' m³ = ' + mv.basis +
+    '. The pump-up FAD is worked from this, not from the receiver alone.', { anchor:'start', size:7.4, fill:C.ink3 }));
+  return svg;
+}
+
 /* ------------------------------------------------------------------
    THE CHAPTER
    ------------------------------------------------------------------ */
@@ -237,13 +340,28 @@ function buildCompressorSection(B){
         [{v:'Average velocity',tone:'head'}, acUnit(k.avgVelocity, 2, 'm/s'), {v:'Running pressure',tone:'head'}, acUnit(k.fadRunningPressure, 1, 'bar')],
         [{v:'Air delivery',tone:'head'}, acUnit(k.fadAirDeliveryM3Sec, 4, 'm³/s') + '  ·  ' + acUnit(k.fadAirDeliveryM3Hr, 1, 'm³/hr') + '  ·  ' + acUnit(k.fadAirDeliveryCfm, 1, 'CFM'), {v:'Measured power',tone:'head'}, acUnit(k.fadMeasuredPower, 2, 'kW')]
       ], { title:'Free air delivery — anemometer test', colw:['20%','32%','20%','28%'] }));
-      var vels = acJson(k.fadVelocities, []);
-      if (Array.isArray(vels) && vels.length){
+      B.push(blk(bChart(acPortDiagram(k, p), 'The port the traverse was taken across, with each reading drawn at the size of its velocity — a small dot is a slow corner.')));
+      var vels = acJson(k.fadVelocities, []).map(num).filter(function(v){ return v !== null; });
+      if (vels.length){
         var per = 6, rows = [];
         for (var vi = 0; vi < vels.length; vi += per)
-          rows.push(['Points ' + (vi + 1) + '–' + Math.min(vi + per, vels.length)].concat(vels.slice(vi, vi + per).map(function(v){ return fix(num(v), 2); }))
+          rows.push(['Points ' + (vi + 1) + '–' + Math.min(vi + per, vels.length)].concat(vels.slice(vi, vi + per).map(function(v){ return fix(v, 2); }))
             .concat(new Array(Math.max(0, per - Math.min(per, vels.length - vi))).fill('')));
         B.push(tblBlock(['Traverse'].concat(new Array(per).fill('m/s')), rows, { size:8, caption:'The velocity traverse as taken: ' + vels.length + ' points across the suction duct, averaged to ' + acUnit(k.avgVelocity, 2, 'm/s') + '.' }));
+        var avgV = num(k.avgVelocity);
+        if (avgV === null) avgV = vels.reduce(function(a, v){ return a + v; }, 0) / vels.length;
+        B.push(blk(bChart(chartBarsRef(vels.map(function(_, i){ return 'P' + (i + 1); }), vels, 'Suction velocity at each traverse point', 'm/s',
+          { ref:{ value:avgV, label:'average ' + fix(avgV, 2) }, colorAt:function(v){ return v < avgV * 0.8 ? C.watch : SERIES[0]; } }),
+          'A point well below the average is a reading taken in a dead corner of the duct, or a filter choking on that side; the average is what the delivery is worked from.')));
+        B.push(blk(bFormula([
+          'Suction area      = ' + (k.fadAreaType === 'Rectangle' ? 'L × B = ' + fix(num(k.fadAreaL) / 1000, 3) + ' × ' + fix(num(k.fadAreaB) / 1000, 3)
+                                  : k.fadAreaType === 'Circle' ? (num(k.fadAreaDia) !== null ? 'π × (dia ÷ 2)²' : num(k.fadAreaRadius) !== null ? 'π × radius²' : 'perimeter² ÷ 4π')
+                                  : 'entered directly') + ' = ' + acUnit(k.suctionArea, 4, 'm²'),
+          'Average velocity  = mean of ' + vels.length + ' traverse points = ' + fix(avgV, 2) + ' m/s',
+          'Air delivery      = area × velocity = ' + fix(num(k.suctionArea), 4) + ' × ' + fix(avgV, 2) + ' = ' + acUnit(k.fadAirDeliveryM3Sec, 4, 'm³/s'),
+          '                  = ' + acUnit(k.fadAirDeliveryM3Hr, 1, 'm³/hr') + '  =  ' + acUnit(k.fadAirDeliveryCfm, 1, 'CFM') + '   (m³/s × 2118.88)',
+          'Actual SEC        = measured power ÷ CFM = ' + fix(num(k.fadMeasuredPower) !== null ? num(k.fadMeasuredPower) : p.measuredKw, 2) + ' ÷ ' + fix(num(k.fadAirDeliveryCfm), 1) + ' = ' + fix(p.actualSEC, 3) + ' kW/CFM'
+        ])));
       }
     }
     if (k.pumpActive || p.testType === 'Pump-up'){
@@ -267,6 +385,8 @@ function buildCompressorSection(B){
         [{v:'Actual FAD',tone:'head'}, acUnit(k.pumpActualFadM3Min, 3, 'm³/min') + '  ·  ' + acUnit(k.pumpActualFadCfm, 1, 'CFM'), {v:'Measured power',tone:'head'}, acUnit(pumpKw, 2, 'kW')]
       ].filter(Boolean), { title:'Free air delivery — receiver pump-up test', colw:['20%','32%','20%','28%'] }));
 
+      if (mv.total) B.push(blk(bChart(acVolumeDiagram(k, mv),
+        'The receiver and the pipe runs either side of it, in proportion. Leaving the pipes out of the volume makes the measured delivery read low.')));
       var laps = acLaps(k).filter(function(l){ return num(l.timeSec) !== null; });
       if (laps.length){
         B.push(tblBlock(['#','Pressure bar','Lap time s','FAD m³/min','FAD × temp. factor','FAD CFM','Energy meter kWh'],

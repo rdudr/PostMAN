@@ -6759,7 +6759,12 @@ function billCalc(){
     var ehvCharges = energyCharge === null ? null : -(num(cfg.ehvPct) || 0) * energyCharge;
     var touPct = (kwh && tou !== null) ? tou / kwh : null;
     var touCharges = tou === null ? null : (num(cfg.touRate) || 0) * tou;
-    var parts = [demandCharge, energyCharge, fuelSurcharge, pfAdj, nightRebate, touCharges, ehvCharges];
+    /* The ToD discount as the bill prints it. DISCOMs print it as a rebate,
+       a discount or a credit, and some print it negative already - it is
+       money off either way, so the sign is taken off and subtracted once. */
+    var touDisc = num(r.touDiscount);
+    var touDiscount = touDisc === null ? null : -Math.abs(touDisc);
+    var parts = [demandCharge, energyCharge, fuelSurcharge, pfAdj, nightRebate, touCharges, touDiscount, ehvCharges];
     var totalCons = parts.some(function(v){ return v !== null; }) ? parts.reduce(function(a, v){ return a + (v || 0); }, 0) : null;
     var duty = totalCons === null ? null : (num(cfg.dutyRate) || 0) * totalCons;
     var totalBill = totalCons === null ? null : totalCons + duty;
@@ -6770,14 +6775,14 @@ function billCalc(){
       eRate:eRate, energyCharge:energyCharge, fRate:fRate, fuelSurcharge:fuelSurcharge,
       pfPct:pfPct, pfAdj:pfAdj, night:night, nightPct:nightPct, nightRate:num(cfg.nightRebateRate) || 0, nightRebate:nightRebate,
       ehvEnergy:energyCharge, ehvPct:num(cfg.ehvPct) || 0, ehvCharges:ehvCharges,
-      tou:tou, touPct:touPct, touRate:num(cfg.touRate) || 0, touCharges:touCharges,
+      tou:tou, touPct:touPct, touRate:num(cfg.touRate) || 0, touCharges:touCharges, touDiscount:touDiscount,
       totalCons:totalCons, dutyRate:num(cfg.dutyRate) || 0, duty:duty, totalBill:totalBill, diff:diff,
       kvah:num(r.kvah), hasData: kwh !== null
     };
   });
   var live = rows.filter(function(r){ return r.hasData; });
   var n = live.length;
-  var keys = ['kwh','bill','rate','pf','md','billingDemand','demandCharge','eRate','energyCharge','fRate','fuelSurcharge','pfPct','pfAdj','night','nightPct','nightRate','nightRebate','ehvEnergy','ehvPct','ehvCharges','tou','touPct','touRate','touCharges','totalCons','dutyRate','duty','totalBill','diff'];
+  var keys = ['kwh','bill','rate','pf','md','billingDemand','demandCharge','eRate','energyCharge','fRate','fuelSurcharge','pfPct','pfAdj','night','nightPct','nightRate','nightRebate','ehvEnergy','ehvPct','ehvCharges','tou','touPct','touRate','touCharges','touDiscount','totalCons','dutyRate','duty','totalBill','diff'];
   var sum = {}, avg = {};
   keys.forEach(function(k){
     var vals = live.map(function(r){ return r[k]; }).filter(function(v){ return v !== null && v !== undefined; });
@@ -6882,15 +6887,22 @@ FORMS.bills = function(w){
   var bar = el('div','display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;');
   bar.appendChild(btn('Create 12 months from FY ' + S.meta.financialYear, function(){
     S.bills = fyMonthKeys(S.meta.financialYear).map(function(p){
-      return { month:monthLabelOf(p.y, p.m), kwh:null, net:null, pf:null, actualMD:null, energyRate:null, fppaRate:null, todNight:null, todPeak:null, contract:num(cfg.contractDemand) };
+      return { month:monthLabelOf(p.y, p.m), kwh:null, net:null, pf:null, actualMD:null, energyRate:null, fppaRate:null, todNight:null, todPeak:null, touDiscount:null, contract:num(cfg.contractDemand) };
     });
     save(); renderAll();
   }));
   bar.appendChild(btn('+ Add a month', function(){
     var last = S.bills[S.bills.length - 1], p = last ? parseMonthLabel(last.month) : null;
     var y = p ? (p.m === 12 ? p.y + 1 : p.y) : new Date().getFullYear(), m = p ? (p.m % 12) + 1 : 4;
-    S.bills.push({ month:monthLabelOf(y, m), kwh:null, net:null, pf:null, actualMD:null, energyRate:null, fppaRate:null, todNight:null, todPeak:null });
+    S.bills.push({ month:monthLabelOf(y, m), kwh:null, net:null, pf:null, actualMD:null, energyRate:null, fppaRate:null, todNight:null, todPeak:null, touDiscount:null });
     save(); renderAll();
+  }));
+  /* The wrong twelve months, or the wrong plant's bills: one button back to
+     an empty sheet, rather than deleting twelve rows one at a time. */
+  bar.appendChild(btn('Clear all bills', function(){
+    var hasData = S.bills.some(function(r){ return num(r.kwh) !== null || r.img; });
+    if (hasData && !confirm('Clear every bill?' + NL2 + 'All ' + S.bills.length + ' months, their figures and any bill pictures go. The twelve months of ' + S.meta.financialYear + ' are laid out again, empty.')) return;
+    resetBills(); save(); renderAll();
   }));
   bar.appendChild(btn('Derive missing rates from bill charges', function(){
     var n = 0; S.bills.forEach(function(r){ var before = (r.energyRate == null) + (r.fppaRate == null); deriveBillRates(r); n += before - ((r.energyRate == null) + (r.fppaRate == null)); });
@@ -6926,12 +6938,12 @@ FORMS.bills = function(w){
     });
     return i;
   };
-  var head = ['Month','Units kWh','Bill amount Rs','PF','Actual MD kVA','Energy rate Rs/kWh','FPPA rate Rs/kWh','Night units','TOU units',
+  var head = ['Month','Units kWh','Bill amount Rs','PF','Actual MD kVA','Energy rate Rs/kWh','FPPA rate Rs/kWh','Night units','TOU units','TOU discount Rs',
               'Rate Rs/kWh','Billing demand','Demand charge','Energy charge','Fuel surcharge','PF adj','TOU charges','Total bill (calc)','Difference',''];
   var tw = el('div'); tw.className = 'tblwrap';
   var t = el('table'); t.className = 'ed';
   var thead = el('thead'), htr = el('tr');
-  head.forEach(function(h, i){ var th = el('th','', h); if (i > 0 && i < 9) th.style.background = 'var(--warn-soft)'; htr.appendChild(th); });
+  head.forEach(function(h, i){ var th = el('th','', h); if (i > 0 && i < 10) th.style.background = 'var(--warn-soft)'; htr.appendChild(th); });
   thead.appendChild(htr); t.appendChild(thead);
   var tb = el('tbody');
   S.bills.forEach(function(r, i){
@@ -6941,7 +6953,7 @@ FORMS.bills = function(w){
     add(inCell(r,'kwh')); add(inCell(r,'net')); add(inCell(r,'pf')); add(inCell(r,'actualMD'));
     var er = add(inCell(r,'energyRate')); if (r.energyRateDerived) er.title = 'Derived: energy charge \u00F7 units';
     var fr = add(inCell(r,'fppaRate')); if (r.fppaRateDerived) fr.title = 'Derived: fuel surcharge \u00F7 units';
-    add(inCell(r,'todNight')); add(inCell(r,'todPeak'));
+    add(inCell(r,'todNight')); add(inCell(r,'todPeak')); add(inCell(r,'touDiscount'));
     k.rate = add('', true); k.bd = add('', true); k.dc = add('', true); k.ec = add('', true); k.fs = add('', true);
     k.pfa = add('', true); k.tou = add('', true); k.tb = add('', true); k.diff = add('', true);
     var del = el('td'); del.className = 'act';
@@ -7047,27 +7059,27 @@ function buildBillSection(B){
   /* --- Part B: night, EHV, TOU, duty, total, check --- */
   var rowsB = live.map(function(r){
     return [r.month, n2(r.night), p1(r.nightPct), r2(r.nightRate), n2(r.nightRebate), n2(r.ehvEnergy), p1(r.ehvPct), n2(r.ehvCharges),
-            n2(r.tou), p1(r.touPct), r2(r.touRate), n2(r.touCharges), n2(r.totalCons), p1(r.dutyRate), n2(r.duty), n2(r.totalBill), n2(r.diff)];
+            n2(r.tou), p1(r.touPct), r2(r.touRate), n2(r.touCharges), n2(r.touDiscount), n2(r.totalCons), p1(r.dutyRate), n2(r.duty), n2(r.totalBill), n2(r.diff)];
   });
-  rowsB.push(['Total', n2(c.sum.night), '***', '***', n2(c.sum.nightRebate), n2(c.sum.ehvEnergy), '***', n2(c.sum.ehvCharges), n2(c.sum.tou), '***', '***', n2(c.sum.touCharges), n2(c.sum.totalCons), '***', n2(c.sum.duty), n2(c.sum.totalBill), '***'].map(H_));
-  rowsB.push(['Average', n2(c.avg.night), p1(c.avg.nightPct), r2(c.avg.nightRate), n2(c.avg.nightRebate), n2(c.avg.ehvEnergy), p1(c.avg.ehvPct), n2(c.avg.ehvCharges), n2(c.avg.tou), p1(c.avg.touPct), r2(c.avg.touRate), n2(c.avg.touCharges), n2(c.avg.totalCons), p1(c.avg.dutyRate), n2(c.avg.duty), n2(c.avg.totalBill), n2(c.avg.diff)].map(H_));
+  rowsB.push(['Total', n2(c.sum.night), '***', '***', n2(c.sum.nightRebate), n2(c.sum.ehvEnergy), '***', n2(c.sum.ehvCharges), n2(c.sum.tou), '***', '***', n2(c.sum.touCharges), n2(c.sum.touDiscount), n2(c.sum.totalCons), '***', n2(c.sum.duty), n2(c.sum.totalBill), '***'].map(H_));
+  rowsB.push(['Average', n2(c.avg.night), p1(c.avg.nightPct), r2(c.avg.nightRate), n2(c.avg.nightRebate), n2(c.avg.ehvEnergy), p1(c.avg.ehvPct), n2(c.avg.ehvCharges), n2(c.avg.tou), p1(c.avg.touPct), r2(c.avg.touRate), n2(c.avg.touCharges), n2(c.avg.touDiscount), n2(c.avg.totalCons), p1(c.avg.dutyRate), n2(c.avg.duty), n2(c.avg.totalBill), n2(c.avg.diff)].map(H_));
   B.push({ node:el('div'), split:false, hardBreak:true });
   B.push(blk(rotatedTable('Electricity consumption and bills (2 of 2) - night hours, EHV, TOU, duty and total',
-    [{v:'',tone:'head'},{v:'Night hour',tone:'head',span:4},{v:'EHV rebate',tone:'head',span:3},{v:'TOU hour',tone:'head',span:4},{v:'Total consumption charge',tone:'head'},{v:'Electricity duty',tone:'head',span:2},{v:'Total bill',tone:'head'},{v:'Difference',tone:'head'}],
-    ['Month','Night units kWh','% night','Rate','Night rebate Rs','EHV energy charge Rs','% EHV','EHV charges Rs','TOU units kWh','% TOU','Rate','TOU charges Rs','Rs','Rate','ED charge Rs','Rs','Bill - computed Rs'],
+    [{v:'',tone:'head'},{v:'Night hour',tone:'head',span:4},{v:'EHV rebate',tone:'head',span:3},{v:'TOU hour',tone:'head',span:5},{v:'Total consumption charge',tone:'head'},{v:'Electricity duty',tone:'head',span:2},{v:'Total bill',tone:'head'},{v:'Difference',tone:'head'}],
+    ['Month','Night units kWh','% night','Rate','Night rebate Rs','EHV energy charge Rs','% EHV','EHV charges Rs','TOU units kWh','% TOU','Rate','TOU charges Rs','TOU discount Rs','Rs','Rate','ED charge Rs','Rs','Bill - computed Rs'],
     rowsB, 7.0)));
 
   /* --- standard format summary --- */
   var rowsS = live.map(function(r){
     return [r.month, n2(c.cd), n2(r.md), n2(r.billingDemand), r3(r.pf), n2(r.kwh), n2(r.night), p1(r.nightPct), n2(r.tou), p1(r.touPct),
-            n2(r.pfAdj === null ? null : -r.pfAdj), n2(r.nightRebate === null ? null : -r.nightRebate), n2(r.touCharges), n2(r.bill)];
+            n2(r.pfAdj === null ? null : -r.pfAdj), n2(r.nightRebate === null ? null : -r.nightRebate), n2(r.touCharges), n2(r.touDiscount === null ? null : -r.touDiscount), n2(r.bill)];
   });
   rowsS.push(['Total / avg', n2(c.cd), n2(c.avg.md), n2(c.avg.billingDemand), r3(c.avg.pf), n2(c.sum.kwh), n2(c.sum.night), p1(c.sum.kwh ? c.sum.night / c.sum.kwh : null), n2(c.sum.tou), p1(c.sum.kwh ? c.sum.tou / c.sum.kwh : null),
-              n2(c.sum.pfAdj === null ? null : -c.sum.pfAdj), n2(c.sum.nightRebate === null ? null : -c.sum.nightRebate), n2(c.sum.touCharges), n2(c.sum.bill)].map(H_));
+              n2(c.sum.pfAdj === null ? null : -c.sum.pfAdj), n2(c.sum.nightRebate === null ? null : -c.sum.nightRebate), n2(c.sum.touCharges), n2(c.sum.touDiscount === null ? null : -c.sum.touDiscount), n2(c.sum.bill)].map(H_));
   B.push({ node:el('div'), split:false, hardBreak:true });
   B.push(blk(rotatedTable('Standard format of electricity bill - per unit rate Rs ' + fix(c.blended, 2) + '/kWh',
     null,
-    ['Month','Contract demand kVA','Actual demand kVA','Billing demand kVA','Power factor','Billed kWh','Night units kWh','% night use','TOU kWh','% TOU','PF rebate Rs','Night rebate Rs','TOU Rs','Bill Rs'],
+    ['Month','Contract demand kVA','Actual demand kVA','Billing demand kVA','Power factor','Billed kWh','Night units kWh','% night use','TOU kWh','% TOU','PF rebate Rs','Night rebate Rs','TOU Rs','TOU discount Rs','Bill Rs'],
     rowsS, 7.6)));
   B.push({ node:el('div'), split:false, hardBreak:true });
   B.push(blk(bP(c.note, { size:9, italic:true })));
@@ -8761,6 +8773,109 @@ function acUploadStamp(){
 function acPct(v){ return v === null || v === undefined || !isFinite(v) ? '\u2014' : (v >= 0 ? '+' : '') + fix(v, 1) + ' %'; }
 function acUnit(v, d, unit){ return num(v) === null ? '\u2014' : fix(num(v), d) + (unit ? ' ' + unit : ''); }
 
+/* The suction port, drawn. A velocity traverse means nothing without the
+   duct it was taken across: this shows the cross-section to scale, its
+   dimensions as the engineer entered them, and where the readings were
+   taken, so a reader can see that the traverse covered the port rather
+   than one convenient corner of it. */
+function acPortDiagram(k, perf){
+  var w = LIVE.w, h = 150;
+  var svg = sv('svg', { viewBox:'0 0 ' + w + ' ' + h, width:'100%', style:'display:block' });
+  svg.appendChild(svText(8, 12, 'Suction port and traverse', { anchor:'start', size:9, weight:600, fill:C.charcoal }));
+  var type = k.fadAreaType || (num(k.fadAreaDia) !== null || num(k.fadAreaRadius) !== null || num(k.fadAreaPeri) !== null ? 'Circle' : 'Direct');
+  var area = num(k.suctionArea);
+  var cx = 86, cy = 86, box = 54;   /* the drawing is schematic, not to scale across types */
+  var vels = acJson(k.fadVelocities, []).map(num).filter(function(v){ return v !== null; });
+  var pts = [];
+  if (type === 'Rectangle'){
+    var L = num(k.fadAreaL) || 0, Bm = num(k.fadAreaB) || 0;
+    var ratio = (L && Bm) ? Math.min(2.2, Math.max(0.45, L / Bm)) : 1.4;
+    var bw = ratio >= 1 ? box * 1.6 : box * 1.6 * ratio, bh = ratio >= 1 ? (box * 1.6) / ratio : box * 1.6;
+    svg.appendChild(sv('rect', { x:cx - bw/2, y:cy - bh/2, width:bw, height:bh, fill:'#F1F5FA', stroke:C.navy, 'stroke-width':1.3 }));
+    svg.appendChild(svText(cx, cy - bh/2 - 5, (L ? fix(L, 0) + ' mm' : 'length'), { size:7, fill:C.ink3 }));
+    svg.appendChild(svText(cx - bw/2 - 6, cy, (Bm ? fix(Bm, 0) + ' mm' : 'width'), { anchor:'end', size:7, fill:C.ink3 }));
+    /* Points across the port, in the grid an engineer actually walks. */
+    var n = vels.length || num(k.fadNumPoints) || 0;
+    var cols = Math.ceil(Math.sqrt(n)) || 1, rows = Math.ceil(n / cols) || 1;
+    for (var i = 0; i < n; i++){
+      var r = Math.floor(i / cols), c2 = i % cols;
+      pts.push([cx - bw/2 + bw * (c2 + 0.5) / cols, cy - bh/2 + bh * (r + 0.5) / rows]);
+    }
+  } else if (type === 'Circle'){
+    var dia = num(k.fadAreaDia), rad = num(k.fadAreaRadius), peri = num(k.fadAreaPeri);
+    var rr = box * 0.9;
+    svg.appendChild(sv('circle', { cx:cx, cy:cy, r:rr, fill:'#F1F5FA', stroke:C.navy, 'stroke-width':1.3 }));
+    svg.appendChild(sv('line', { x1:cx - rr, x2:cx + rr, y1:cy, y2:cy, stroke:C.rule, 'stroke-width':0.8, 'stroke-dasharray':'3 3' }));
+    var lbl = dia !== null ? 'dia ' + fix(dia, 3) + ' m' : rad !== null ? 'radius ' + fix(rad, 3) + ' m' : peri !== null ? 'perimeter ' + fix(peri, 3) + ' m' : '';
+    if (lbl) svg.appendChild(svText(cx, cy - rr - 5, lbl, { size:7, fill:C.ink3 }));
+    var n2 = vels.length || num(k.fadNumPoints) || 0;
+    /* Readings on a round duct are taken along two diameters. */
+    for (var j = 0; j < n2; j++){
+      var half = Math.ceil(n2 / 2);
+      var along = (j % half + 0.5) / half * 2 - 1;      /* -1 .. 1 */
+      var onX = j < half;
+      pts.push([cx + (onX ? along * rr * 0.82 : 0), cy + (onX ? 0 : along * rr * 0.82)]);
+    }
+  } else {
+    svg.appendChild(sv('rect', { x:cx - box, y:cy - box * 0.7, width:box * 2, height:box * 1.4, fill:'#F1F5FA', stroke:C.navy, 'stroke-width':1.3, 'stroke-dasharray':'4 3' }));
+    svg.appendChild(svText(cx, cy, 'area entered directly', { size:7, fill:C.ink3 }));
+  }
+  /* A point is drawn the size of its reading, so a slow corner shows. */
+  var vmax = vels.length ? Math.max.apply(null, vels) : 1;
+  pts.forEach(function(p, i){
+    var v = vels[i];
+    var rr2 = v === undefined ? 2 : 1.6 + 2.6 * (v / (vmax || 1));
+    svg.appendChild(sv('circle', { cx:p[0], cy:p[1], r:rr2, fill:SERIES[0], 'fill-opacity':0.75 }));
+  });
+  /* The working, beside the picture. */
+  var lines = [
+    ['Port', type === 'Rectangle' ? 'rectangular duct' : type === 'Circle' ? 'round duct' : 'area entered directly'],
+    ['Suction area', (area === null ? '\u2014' : fix(area, 4) + ' m\u00B2') +
+      (type === 'Rectangle' && num(k.fadAreaL) && num(k.fadAreaB) ? '  =  ' + fix(num(k.fadAreaL) / 1000, 3) + ' \u00D7 ' + fix(num(k.fadAreaB) / 1000, 3) + ' m' : '') +
+      (type === 'Circle' && num(k.fadAreaPeri) ? '  =  perimeter\u00B2 \u00F7 4\u03C0' : '') +
+      (type === 'Circle' && num(k.fadAreaDia) ? '  =  \u03C0 \u00D7 (dia \u00F7 2)\u00B2' : '')],
+    ['Traverse', (vels.length ? vels.length + ' points' : 'not recorded') +
+      (vels.length ? ', ' + fix(Math.min.apply(null, vels), 1) + ' to ' + fix(vmax, 1) + ' m/s' : '')],
+    ['Average velocity', acUnit(k.avgVelocity, 2, 'm/s')],
+    ['Air delivery', acUnit(k.fadAirDeliveryM3Sec, 4, 'm\u00B3/s') + '  =  area \u00D7 velocity'],
+    ['', acUnit(k.fadAirDeliveryCfm, 1, 'CFM') + '  =  m\u00B3/s \u00D7 2118.88']
+  ];
+  lines.forEach(function(l, i){
+    var y = 34 + i * 17;
+    if (l[0]) svg.appendChild(svText(184, y, l[0], { anchor:'start', size:7.4, fill:C.ink3 }));
+    svg.appendChild(svText(268, y, l[1], { anchor:'start', size:8, fill:C.charcoal, mono:true }));
+  });
+  return svg;
+}
+
+/* The pump-up volume, drawn: the receiver and the two pipe runs that fill
+   with it, in proportion, because a reader who cannot see the make-up
+   cannot judge the delivery figure that comes out of it. */
+function acVolumeDiagram(k, mv){
+  var w = LIVE.w, h = 112;
+  var svg = sv('svg', { viewBox:'0 0 ' + w + ' ' + h, width:'100%', style:'display:block' });
+  svg.appendChild(svText(8, 12, 'Main volume \u2014 what the air fills', { anchor:'start', size:9, weight:600, fill:C.charcoal }));
+  var parts = [['Receiver', mv.tank, SERIES[0]], ['Inlet pipe', mv.inlet, SERIES[1]], ['Outlet pipe', mv.outlet, SERIES[3]]]
+                .filter(function(p){ return p[1] !== null && p[1] > 0; });
+  var total = mv.total || parts.reduce(function(a, p){ return a + p[1]; }, 0);
+  if (!total) return svg;
+  /* The compressor, the pipe in, the receiver, the pipe out. */
+  var y0 = 40, bw = w - 120, x = 96;
+  svg.appendChild(sv('rect', { x:14, y:y0 + 4, width:62, height:30, rx:3, fill:'#F1F5FA', stroke:C.navy, 'stroke-width':1.2 }));
+  svg.appendChild(svText(45, y0 + 23, 'compressor', { size:7.2, fill:C.charcoal }));
+  parts.forEach(function(p){
+    var pw = Math.max(6, (p[1] / total) * bw);
+    svg.appendChild(sv('rect', { x:x, y:y0, width:pw - 2, height:38, rx:2, fill:p[2], 'fill-opacity':0.82 }));
+    svg.appendChild(svText(x + pw / 2 - 1, y0 + 23, fix((p[1] / total) * 100, 0) + ' %', { size:7.4, fill:'#fff', weight:600 }));
+    svg.appendChild(svText(x + pw / 2 - 1, y0 + 50, p[0], { size:7, fill:C.ink3 }));
+    svg.appendChild(svText(x + pw / 2 - 1, y0 + 60, fix(p[1], 3) + ' m\u00B3', { size:6.8, fill:C.ink3, mono:true }));
+    x += pw;
+  });
+  svg.appendChild(svText(8, 92, 'Main volume ' + fix(total, 3) + ' m\u00B3 = ' + mv.basis +
+    '. The pump-up FAD is worked from this, not from the receiver alone.', { anchor:'start', size:7.4, fill:C.ink3 }));
+  return svg;
+}
+
 /* ------------------------------------------------------------------
    THE CHAPTER
    ------------------------------------------------------------------ */
@@ -8875,13 +8990,28 @@ function buildCompressorSection(B){
         [{v:'Average velocity',tone:'head'}, acUnit(k.avgVelocity, 2, 'm/s'), {v:'Running pressure',tone:'head'}, acUnit(k.fadRunningPressure, 1, 'bar')],
         [{v:'Air delivery',tone:'head'}, acUnit(k.fadAirDeliveryM3Sec, 4, 'm\u00B3/s') + '  \u00B7  ' + acUnit(k.fadAirDeliveryM3Hr, 1, 'm\u00B3/hr') + '  \u00B7  ' + acUnit(k.fadAirDeliveryCfm, 1, 'CFM'), {v:'Measured power',tone:'head'}, acUnit(k.fadMeasuredPower, 2, 'kW')]
       ], { title:'Free air delivery \u2014 anemometer test', colw:['20%','32%','20%','28%'] }));
-      var vels = acJson(k.fadVelocities, []);
-      if (Array.isArray(vels) && vels.length){
+      B.push(blk(bChart(acPortDiagram(k, p), 'The port the traverse was taken across, with each reading drawn at the size of its velocity \u2014 a small dot is a slow corner.')));
+      var vels = acJson(k.fadVelocities, []).map(num).filter(function(v){ return v !== null; });
+      if (vels.length){
         var per = 6, rows = [];
         for (var vi = 0; vi < vels.length; vi += per)
-          rows.push(['Points ' + (vi + 1) + '\u2013' + Math.min(vi + per, vels.length)].concat(vels.slice(vi, vi + per).map(function(v){ return fix(num(v), 2); }))
+          rows.push(['Points ' + (vi + 1) + '\u2013' + Math.min(vi + per, vels.length)].concat(vels.slice(vi, vi + per).map(function(v){ return fix(v, 2); }))
             .concat(new Array(Math.max(0, per - Math.min(per, vels.length - vi))).fill('')));
         B.push(tblBlock(['Traverse'].concat(new Array(per).fill('m/s')), rows, { size:8, caption:'The velocity traverse as taken: ' + vels.length + ' points across the suction duct, averaged to ' + acUnit(k.avgVelocity, 2, 'm/s') + '.' }));
+        var avgV = num(k.avgVelocity);
+        if (avgV === null) avgV = vels.reduce(function(a, v){ return a + v; }, 0) / vels.length;
+        B.push(blk(bChart(chartBarsRef(vels.map(function(_, i){ return 'P' + (i + 1); }), vels, 'Suction velocity at each traverse point', 'm/s',
+          { ref:{ value:avgV, label:'average ' + fix(avgV, 2) }, colorAt:function(v){ return v < avgV * 0.8 ? C.watch : SERIES[0]; } }),
+          'A point well below the average is a reading taken in a dead corner of the duct, or a filter choking on that side; the average is what the delivery is worked from.')));
+        B.push(blk(bFormula([
+          'Suction area      = ' + (k.fadAreaType === 'Rectangle' ? 'L \u00D7 B = ' + fix(num(k.fadAreaL) / 1000, 3) + ' \u00D7 ' + fix(num(k.fadAreaB) / 1000, 3)
+                                  : k.fadAreaType === 'Circle' ? (num(k.fadAreaDia) !== null ? '\u03C0 \u00D7 (dia \u00F7 2)\u00B2' : num(k.fadAreaRadius) !== null ? '\u03C0 \u00D7 radius\u00B2' : 'perimeter\u00B2 \u00F7 4\u03C0')
+                                  : 'entered directly') + ' = ' + acUnit(k.suctionArea, 4, 'm\u00B2'),
+          'Average velocity  = mean of ' + vels.length + ' traverse points = ' + fix(avgV, 2) + ' m/s',
+          'Air delivery      = area \u00D7 velocity = ' + fix(num(k.suctionArea), 4) + ' \u00D7 ' + fix(avgV, 2) + ' = ' + acUnit(k.fadAirDeliveryM3Sec, 4, 'm\u00B3/s'),
+          '                  = ' + acUnit(k.fadAirDeliveryM3Hr, 1, 'm\u00B3/hr') + '  =  ' + acUnit(k.fadAirDeliveryCfm, 1, 'CFM') + '   (m\u00B3/s \u00D7 2118.88)',
+          'Actual SEC        = measured power \u00F7 CFM = ' + fix(num(k.fadMeasuredPower) !== null ? num(k.fadMeasuredPower) : p.measuredKw, 2) + ' \u00F7 ' + fix(num(k.fadAirDeliveryCfm), 1) + ' = ' + fix(p.actualSEC, 3) + ' kW/CFM'
+        ])));
       }
     }
     if (k.pumpActive || p.testType === 'Pump-up'){
@@ -8905,6 +9035,8 @@ function buildCompressorSection(B){
         [{v:'Actual FAD',tone:'head'}, acUnit(k.pumpActualFadM3Min, 3, 'm\u00B3/min') + '  \u00B7  ' + acUnit(k.pumpActualFadCfm, 1, 'CFM'), {v:'Measured power',tone:'head'}, acUnit(pumpKw, 2, 'kW')]
       ].filter(Boolean), { title:'Free air delivery \u2014 receiver pump-up test', colw:['20%','32%','20%','28%'] }));
 
+      if (mv.total) B.push(blk(bChart(acVolumeDiagram(k, mv),
+        'The receiver and the pipe runs either side of it, in proportion. Leaving the pipes out of the volume makes the measured delivery read low.')));
       var laps = acLaps(k).filter(function(l){ return num(l.timeSec) !== null; });
       if (laps.length){
         B.push(tblBlock(['#','Pressure bar','Lap time s','FAD m\u00B3/min','FAD \u00D7 temp. factor','FAD CFM','Energy meter kWh'],
@@ -9904,6 +10036,9 @@ function customBlockEditor(sec, b, bi){
    should have been looked at by one.
    =================================================================== */
 
+/* A blank line inside a confirm box, without an escape in sight. */
+var NL2 = String.fromCharCode(10, 10);
+
 var BILL_FIELDS = [
   /* The nine yellow cells of the workbook - what the report actually needs. */
   { k:'month',        t:'Billing month',     type:'text', yellow:true },
@@ -9915,6 +10050,7 @@ var BILL_FIELDS = [
   { k:'fppaRate',     t:'FPPA rate',         unit:'\u20B9/kWh', yellow:true, derived:'fuel surcharge \u00F7 units' },
   { k:'todNight',     t:'Night units',       unit:'kWh', yellow:true },
   { k:'todPeak',      t:'TOU units',         unit:'kWh', yellow:true },
+  { k:'touDiscount',  t:'TOU / ToD discount', unit:'\u20b9', yellow:true },
   /* Also read, for the tariff header and for cross-checking the computed columns. */
   { k:'contract',     t:'Contract demand',   unit:'kVA' },
   { k:'billingDemand',t:'Billing demand (as billed)', unit:'kVA' },
@@ -9968,7 +10104,12 @@ var BILL_PATTERNS = [
   ['net',           ['net amount payable','amount payable','net payable','total amount payable',
                      'bill amount','net bill amount','grand total','total payable','net amount']],
   ['todNight',      ['tod night','night hours','off peak units','zone c','night units','tod-3','tod 3']],
-  ['todPeak',       ['tod peak','peak hours','peak units','zone b','tod-2','tod 2']]
+  ['todPeak',       ['tod peak','peak hours','peak units','zone b','tod-2','tod 2']],
+  /* The money the ToD clock gives back. Printed as a rebate, a discount or
+     a credit depending on the DISCOM, and always as a negative line in the
+     charges - the sign is taken off it, the column is a discount. */
+  ['touDiscount',   ['tod rebate','tod discount','tod credit','tou rebate','tou discount',
+                     'time of day rebate','time of day discount','tod concession','night rebate']]
 ];
 
 var MONTH_WORDS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
@@ -10192,6 +10333,26 @@ function billMissing(b){
     return k === 'month' ? !b.month : num(b[k]) === null;
   });
 }
+/* Everything a bill picked up - the picture, its sheets, what the reader
+   found, what was typed - leaving the month itself in place. */
+function clearBill(b){
+  var month = b.month;
+  Object.keys(b).forEach(function(k){ delete b[k]; });
+  b.month = month;
+  BILL_FIELDS.forEach(function(f){ if (f.k !== 'month' && !(f.k in b)) b[f.k] = null; });
+}
+/* Back to twelve empty months of the report's financial year. */
+function resetBills(){
+  S.bills = [];
+  S.billCursor = 0;
+  if (typeof ensureBillMonths === 'function') ensureBillMonths();
+  if (!S.bills.length) fyMonths(S.meta.financialYear).forEach(function(m){
+    var row = { month:m };
+    BILL_FIELDS.forEach(function(f){ if (f.k !== 'month') row[f.k] = null; });
+    S.bills.push(row);
+  });
+}
+
 function billsProgress(){
   var total = S.bills.length;
   var done = S.bills.filter(function(b){ return b.verified; }).length;
@@ -10294,16 +10455,20 @@ function probeOcr(){
 }
 
 /* ---- ingestion ---------------------------------------------------- */
-/* A bill is one page. Twelve months may arrive as one twelve-page PDF, as
-   twelve separate PDFs, or as twelve photographs - all three end up as the
-   same list of pages, each with a picture and whatever text could be had. */
+/* Twelve months may arrive as one twelve-page PDF, as twelve separate PDFs,
+   or as twelve photographs. A DISCOM bill is also often three pages itself -
+   the summary, the detail, the terms - and that is the case this used to get
+   wrong: every page became a bill of its own, so pages two and three of one
+   bill landed on the same month and overwrote the page that carried the
+   figures. Pages are therefore grouped into bills first (see groupBillPages)
+   and each bill is handed over once, carrying all of its pages. */
 function ingestBillPdf(file, onPage){
   return ensurePdfJs().then(function(pdfjs){
     return readFileBuffer(file).then(function(buf){
       return pdfjs.getDocument({ data:new Uint8Array(buf) }).promise;
     });
   }).then(function(doc){
-    var chain = Promise.resolve();
+    var chain = Promise.resolve(), got = [];
     for (var p = 1; p <= doc.numPages; p++){
       (function(p){
         chain = chain.then(function(){
@@ -10335,18 +10500,76 @@ function ingestBillPdf(file, onPage){
               cv.width = Math.round(v2.width); cv.height = Math.round(v2.height);
               return page.render({ canvasContext:cv.getContext('2d'), viewport:v2 }).promise
                 .then(function(){
-                  onPage({ src:file.name + ' p' + p,
-                           img:{ dataUrl:cv.toDataURL('image/jpeg', 0.72), w:cv.width, h:cv.height },
-                           text:text, tokens:tokens,
-                           textLayer: text.replace(/\s/g,'').length > 60 });
+                  got.push({ no:p, height:vp.height,
+                             img:{ dataUrl:cv.toDataURL('image/jpeg', 0.72), w:cv.width, h:cv.height },
+                             text:text, tokens:tokens,
+                             textLayer: text.replace(/\s/g,'').length > 60 });
                 });
             });
           });
         });
       })(p);
     }
-    return chain;
+    return chain.then(function(){
+      groupBillPages(got).forEach(function(bill){
+        bill.src = file.name + (got.length > 1 ? ' p' + bill.pages.map(function(x){ return x.no; }).join(',') : '');
+        onPage(bill);
+      });
+    });
   });
+}
+
+/* Which pages belong to the same bill.
+
+   Two things say "this page opens a new bill": a billing month different
+   from the one the bill in hand carries, or - when no month could be read
+   anywhere - a page that repeats the pair of figures that identify a bill
+   (units consumed AND amount payable) when the bill in hand already has
+   them. Everything else is a continuation sheet, and continuation sheets
+   are where the tariff detail usually lives, so they are kept.
+
+   A twelve-page PDF of twelve bills still splits into twelve: each page
+   names its own month. A three-page bill stays one bill: its pages two and
+   three name the same month, or no month at all. */
+function groupBillPages(pages){
+  var bills = [], cur = null;
+  pages.forEach(function(pg){
+    var hits = extractBill(pg.tokens && pg.tokens.length ? pg.tokens : pg.text);
+    pg.month = hits.month ? String(hits.month.value) : '';
+    pg.strong = !!(hits.kwh && hits.net);
+    /* How much of a bill this page carries, so the picture shown for the
+       bill is the page an engineer would check the figures against. */
+    pg.score = ['kwh','net','pf','actualMD','energyCharge','demandCharge','todNight','todPeak']
+                 .reduce(function(n, k){ return n + (hits[k] ? 1 : 0); }, 0);
+    var fresh = !cur
+      || (pg.month && cur.month && pg.month.toLowerCase() !== cur.month.toLowerCase())
+      || (!pg.month && !cur.month && pg.strong && cur.strong);
+    if (fresh){ cur = { pages:[], month:pg.month, strong:pg.strong }; bills.push(cur); }
+    else if (pg.month && !cur.month) cur.month = pg.month;
+    cur.strong = cur.strong || pg.strong;
+    cur.pages.push(pg);
+  });
+  return bills.map(mergeBillPages);
+}
+/* One bill out of its pages: the text of all of them, the tokens of all of
+   them with each page pushed down below the last so a line on page two can
+   never be read as the continuation of a line on page one, and the picture
+   of whichever page carries most of the figures. */
+function mergeBillPages(bill){
+  var pages = bill.pages, tokens = [], offset = 0, best = pages[0];
+  pages.forEach(function(pg){
+    (pg.tokens || []).forEach(function(t){
+      tokens.push({ t:t.t, x:t.x, y:t.y + offset, w:t.w, h:t.h });
+    });
+    offset += (pg.height || 1000) + 40;
+    if (pg.score > best.score) best = pg;
+  });
+  return {
+    img: best.img, text: pages.map(function(p){ return p.text; }).join('\n'),
+    tokens: tokens, textLayer: pages.some(function(p){ return p.textLayer; }),
+    pages: pages.map(function(p){ return { no:p.no, img:p.img }; }),
+    mainPage: best.no
+  };
 }
 function readFileBuffer(file){
   return new Promise(function(res, rej){
@@ -10380,6 +10603,11 @@ function attachPage(page){
   }
   if (!row){ row = { month:'' }; S.bills.push(row); }
   row.img = page.img;
+  /* Every sheet of the bill, so the one with the tariff detail is a click
+     away on the verify screen instead of being thrown away. */
+  row.pages = (page.pages && page.pages.length > 1) ? page.pages : null;
+  row.pageView = 0;
+  row.mainPage = page.mainPage || null;
   row.src = page.src;
   row.ocr = page.text || '';
   row.tokens = page.tokens || null;
@@ -10490,10 +10718,10 @@ function runOcrOn(row, statusFn){
    every time. When the page-wide pass misses a field - and on a bad scan it
    will - dragging a box round the number beats typing it, and beats trusting
    a guess nobody checked. */
-function readRegion(row, rect, statusFn){
+function readRegion(row, rect, statusFn, source){
   return ensureTesseract().then(function(){
     statusFn('Cropping\u2026');
-    return loadImg(row.img.dataUrl);
+    return loadImg((source || row.img).dataUrl);
   }).then(function(img){
     var sc = Math.max(2, Math.min(6, 420 / Math.max(8, rect.h)));
     var cv = document.createElement('canvas');
@@ -10580,6 +10808,27 @@ FORMS.verify = function(w){
     S.billCursor = (idx + 1) % S.bills.length; save(); renderAll(); }));
   if (prog.left) nav.appendChild(btn('Jump to next unverified', function(){
     var n = nextUnverified(idx); if (n >= 0){ S.billCursor = n; save(); renderAll(); } }));
+
+  /* Undoing a mistake: the wrong file on a month, or the whole set.
+     Taking the picture off keeps the month in the list, because the twelve
+     months are the shape of the report and deleting one leaves a hole in
+     every chart; deleting the month is the separate, deliberate act. */
+  var gap = el('span','flex:1 1 auto;'); nav.appendChild(gap);
+  if (b && (b.img || b.verified || num(b.kwh) !== null)) nav.appendChild(btn('Clear this bill', function(){
+    if (!confirm('Remove the picture and every figure read for ' + (b.month || 'this month') + '?' + NL2 + 'The month stays in the list, empty.')) return;
+    clearBill(b); save(); renderAll();
+  }));
+  nav.appendChild(btn('Delete this month', function(){
+    if (!confirm('Delete ' + (b.month || 'this month') + ' from the bill list?')) return;
+    S.bills.splice(idx, 1);
+    S.billCursor = Math.max(0, Math.min(idx, S.bills.length - 1));
+    save(); renderAll();
+  }));
+  nav.appendChild(btn('Start over \u2014 clear all bills', function(){
+    if (!confirm('Clear every bill?' + NL2 + 'All ' + S.bills.length + ' months, their pictures and their figures go. The twelve months of ' + S.meta.financialYear + ' are laid out again, empty.')) return;
+    resetBills();
+    save(); renderAll();
+  }));
   top.appendChild(nav);
   w.appendChild(top);
 
@@ -10707,23 +10956,39 @@ FORMS.verify = function(w){
     'Click a field on the left, press Read a box, then drag a box round that number on the bill.' :
     'No image for this month \u2014 upload one below and it attaches here.');
   if (b.img){
+    /* A bill of several sheets: the figures are on one of them and the
+       tariff detail on another, so both have to be reachable. */
+    if (b.pages && b.pages.length > 1){
+      var strip = el('div','display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center;');
+      strip.appendChild(el('span','font-size:12px;color:var(--ink-3);', b.pages.length + ' sheets in this bill:'));
+      b.pages.forEach(function(pg, pi){
+        var on = (b.pageView || 0) === pi;
+        var pb = btn('Sheet ' + pg.no + (pg.no === b.mainPage ? ' \u2713' : ''), function(){
+          b.pageView = pi; b.zoom = null; b.panX = 0; b.panY = 0; save(); renderAll();
+        }, on ? 'primary' : '');
+        if (pg.no === b.mainPage) pb.title = 'The sheet the figures were read from.';
+        strip.appendChild(pb);
+      });
+      rc.appendChild(strip);
+    }
     var zoomWrap = el('div','display:flex;gap:10px;align-items:center;margin-bottom:8px;');
     var zr = el('input'); zr.type='range'; zr.min='0.4'; zr.max='4'; zr.step='0.05';
     zr.value = String(b.zoom || 1); zr.style.flex = '1';
     var view = el('div','position:relative;overflow:hidden;background:#f1f4f7;border:1px solid var(--rule);' +
       'border-radius:6px;height:min(74vh,860px);cursor:grab;');
     var im = el('img','position:absolute;transform-origin:0 0;user-select:none;-webkit-user-drag:none;max-width:none;');
-    im.src = b.img.dataUrl; im.alt = 'Electricity bill ' + (b.month || '');
+    var shown = (b.pages && b.pages[b.pageView || 0]) ? b.pages[b.pageView || 0].img : b.img;
+    im.src = shown.dataUrl; im.alt = 'Electricity bill ' + (b.month || '');
     view.appendChild(im);
 
     var st = { z: b.zoom || null, x: b.panX || 0, y: b.panY || 0 };
     function fit(){
       var vw = view.clientWidth || 600;
-      st.z = Math.min(vw / b.img.w, (view.clientHeight||700) / b.img.h);
-      st.x = (vw - b.img.w * st.z) / 2; st.y = 0;
+      st.z = Math.min(vw / shown.w, (view.clientHeight||700) / shown.h);
+      st.x = (vw - shown.w * st.z) / 2; st.y = 0;
     }
     function paint(){
-      im.style.width = b.img.w + 'px';
+      im.style.width = shown.w + 'px';
       im.style.transform = 'translate(' + st.x + 'px,' + st.y + 'px) scale(' + st.z + ')';
       zr.value = String(st.z);
     }
@@ -10805,12 +11070,12 @@ FORMS.verify = function(w){
         box0 = null;
         marquee.style.display = 'none';
         var rect = { x:Math.max(0,p1.x), y:Math.max(0,p1.y),
-                     w:Math.min(b.img.w,p2.x) - Math.max(0,p1.x),
-                     h:Math.min(b.img.h,p2.y) - Math.max(0,p1.y) };
+                     w:Math.min(shown.w,p2.x) - Math.max(0,p1.x),
+                     h:Math.min(shown.h,p2.y) - Math.max(0,p1.y) };
         if (rect.w < 6 || rect.h < 5){ readStatus.textContent = 'Box too small \u2014 drag across the whole number.'; return; }
         if (!BILL_FOCUS){ readStatus.textContent = 'Click the field you want first, then drag the box.'; return; }
         readStatus.textContent = 'Reading' + '\u2026';
-        readRegion(b, rect, function(t){ readStatus.textContent = t; })
+        readRegion(b, rect, function(t){ readStatus.textContent = t; }, shown)
           .then(function(res){
             if (res.value === null && !res.raw){
               readStatus.textContent = 'Nothing readable in that box.'; return;

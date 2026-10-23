@@ -16,6 +16,9 @@
    should have been looked at by one.
    =================================================================== */
 
+/* A blank line inside a confirm box, without an escape in sight. */
+var NL2 = String.fromCharCode(10, 10);
+
 var BILL_FIELDS = [
   /* The nine yellow cells of the workbook - what the report actually needs. */
   { k:'month',        t:'Billing month',     type:'text', yellow:true },
@@ -27,6 +30,7 @@ var BILL_FIELDS = [
   { k:'fppaRate',     t:'FPPA rate',         unit:'₹/kWh', yellow:true, derived:'fuel surcharge ÷ units' },
   { k:'todNight',     t:'Night units',       unit:'kWh', yellow:true },
   { k:'todPeak',      t:'TOU units',         unit:'kWh', yellow:true },
+  { k:'touDiscount',  t:'TOU / ToD discount', unit:'\u20b9', yellow:true },
   /* Also read, for the tariff header and for cross-checking the computed columns. */
   { k:'contract',     t:'Contract demand',   unit:'kVA' },
   { k:'billingDemand',t:'Billing demand (as billed)', unit:'kVA' },
@@ -80,7 +84,12 @@ var BILL_PATTERNS = [
   ['net',           ['net amount payable','amount payable','net payable','total amount payable',
                      'bill amount','net bill amount','grand total','total payable','net amount']],
   ['todNight',      ['tod night','night hours','off peak units','zone c','night units','tod-3','tod 3']],
-  ['todPeak',       ['tod peak','peak hours','peak units','zone b','tod-2','tod 2']]
+  ['todPeak',       ['tod peak','peak hours','peak units','zone b','tod-2','tod 2']],
+  /* The money the ToD clock gives back. Printed as a rebate, a discount or
+     a credit depending on the DISCOM, and always as a negative line in the
+     charges - the sign is taken off it, the column is a discount. */
+  ['touDiscount',   ['tod rebate','tod discount','tod credit','tou rebate','tou discount',
+                     'time of day rebate','time of day discount','tod concession','night rebate']]
 ];
 
 var MONTH_WORDS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
@@ -304,6 +313,26 @@ function billMissing(b){
     return k === 'month' ? !b.month : num(b[k]) === null;
   });
 }
+/* Everything a bill picked up - the picture, its sheets, what the reader
+   found, what was typed - leaving the month itself in place. */
+function clearBill(b){
+  var month = b.month;
+  Object.keys(b).forEach(function(k){ delete b[k]; });
+  b.month = month;
+  BILL_FIELDS.forEach(function(f){ if (f.k !== 'month' && !(f.k in b)) b[f.k] = null; });
+}
+/* Back to twelve empty months of the report's financial year. */
+function resetBills(){
+  S.bills = [];
+  S.billCursor = 0;
+  if (typeof ensureBillMonths === 'function') ensureBillMonths();
+  if (!S.bills.length) fyMonths(S.meta.financialYear).forEach(function(m){
+    var row = { month:m };
+    BILL_FIELDS.forEach(function(f){ if (f.k !== 'month') row[f.k] = null; });
+    S.bills.push(row);
+  });
+}
+
 function billsProgress(){
   var total = S.bills.length;
   var done = S.bills.filter(function(b){ return b.verified; }).length;
@@ -406,16 +435,20 @@ function probeOcr(){
 }
 
 /* ---- ingestion ---------------------------------------------------- */
-/* A bill is one page. Twelve months may arrive as one twelve-page PDF, as
-   twelve separate PDFs, or as twelve photographs - all three end up as the
-   same list of pages, each with a picture and whatever text could be had. */
+/* Twelve months may arrive as one twelve-page PDF, as twelve separate PDFs,
+   or as twelve photographs. A DISCOM bill is also often three pages itself -
+   the summary, the detail, the terms - and that is the case this used to get
+   wrong: every page became a bill of its own, so pages two and three of one
+   bill landed on the same month and overwrote the page that carried the
+   figures. Pages are therefore grouped into bills first (see groupBillPages)
+   and each bill is handed over once, carrying all of its pages. */
 function ingestBillPdf(file, onPage){
   return ensurePdfJs().then(function(pdfjs){
     return readFileBuffer(file).then(function(buf){
       return pdfjs.getDocument({ data:new Uint8Array(buf) }).promise;
     });
   }).then(function(doc){
-    var chain = Promise.resolve();
+    var chain = Promise.resolve(), got = [];
     for (var p = 1; p <= doc.numPages; p++){
       (function(p){
         chain = chain.then(function(){
@@ -447,18 +480,76 @@ function ingestBillPdf(file, onPage){
               cv.width = Math.round(v2.width); cv.height = Math.round(v2.height);
               return page.render({ canvasContext:cv.getContext('2d'), viewport:v2 }).promise
                 .then(function(){
-                  onPage({ src:file.name + ' p' + p,
-                           img:{ dataUrl:cv.toDataURL('image/jpeg', 0.72), w:cv.width, h:cv.height },
-                           text:text, tokens:tokens,
-                           textLayer: text.replace(/\s/g,'').length > 60 });
+                  got.push({ no:p, height:vp.height,
+                             img:{ dataUrl:cv.toDataURL('image/jpeg', 0.72), w:cv.width, h:cv.height },
+                             text:text, tokens:tokens,
+                             textLayer: text.replace(/\s/g,'').length > 60 });
                 });
             });
           });
         });
       })(p);
     }
-    return chain;
+    return chain.then(function(){
+      groupBillPages(got).forEach(function(bill){
+        bill.src = file.name + (got.length > 1 ? ' p' + bill.pages.map(function(x){ return x.no; }).join(',') : '');
+        onPage(bill);
+      });
+    });
   });
+}
+
+/* Which pages belong to the same bill.
+
+   Two things say "this page opens a new bill": a billing month different
+   from the one the bill in hand carries, or - when no month could be read
+   anywhere - a page that repeats the pair of figures that identify a bill
+   (units consumed AND amount payable) when the bill in hand already has
+   them. Everything else is a continuation sheet, and continuation sheets
+   are where the tariff detail usually lives, so they are kept.
+
+   A twelve-page PDF of twelve bills still splits into twelve: each page
+   names its own month. A three-page bill stays one bill: its pages two and
+   three name the same month, or no month at all. */
+function groupBillPages(pages){
+  var bills = [], cur = null;
+  pages.forEach(function(pg){
+    var hits = extractBill(pg.tokens && pg.tokens.length ? pg.tokens : pg.text);
+    pg.month = hits.month ? String(hits.month.value) : '';
+    pg.strong = !!(hits.kwh && hits.net);
+    /* How much of a bill this page carries, so the picture shown for the
+       bill is the page an engineer would check the figures against. */
+    pg.score = ['kwh','net','pf','actualMD','energyCharge','demandCharge','todNight','todPeak']
+                 .reduce(function(n, k){ return n + (hits[k] ? 1 : 0); }, 0);
+    var fresh = !cur
+      || (pg.month && cur.month && pg.month.toLowerCase() !== cur.month.toLowerCase())
+      || (!pg.month && !cur.month && pg.strong && cur.strong);
+    if (fresh){ cur = { pages:[], month:pg.month, strong:pg.strong }; bills.push(cur); }
+    else if (pg.month && !cur.month) cur.month = pg.month;
+    cur.strong = cur.strong || pg.strong;
+    cur.pages.push(pg);
+  });
+  return bills.map(mergeBillPages);
+}
+/* One bill out of its pages: the text of all of them, the tokens of all of
+   them with each page pushed down below the last so a line on page two can
+   never be read as the continuation of a line on page one, and the picture
+   of whichever page carries most of the figures. */
+function mergeBillPages(bill){
+  var pages = bill.pages, tokens = [], offset = 0, best = pages[0];
+  pages.forEach(function(pg){
+    (pg.tokens || []).forEach(function(t){
+      tokens.push({ t:t.t, x:t.x, y:t.y + offset, w:t.w, h:t.h });
+    });
+    offset += (pg.height || 1000) + 40;
+    if (pg.score > best.score) best = pg;
+  });
+  return {
+    img: best.img, text: pages.map(function(p){ return p.text; }).join('\n'),
+    tokens: tokens, textLayer: pages.some(function(p){ return p.textLayer; }),
+    pages: pages.map(function(p){ return { no:p.no, img:p.img }; }),
+    mainPage: best.no
+  };
 }
 function readFileBuffer(file){
   return new Promise(function(res, rej){
@@ -492,6 +583,11 @@ function attachPage(page){
   }
   if (!row){ row = { month:'' }; S.bills.push(row); }
   row.img = page.img;
+  /* Every sheet of the bill, so the one with the tariff detail is a click
+     away on the verify screen instead of being thrown away. */
+  row.pages = (page.pages && page.pages.length > 1) ? page.pages : null;
+  row.pageView = 0;
+  row.mainPage = page.mainPage || null;
   row.src = page.src;
   row.ocr = page.text || '';
   row.tokens = page.tokens || null;
@@ -602,10 +698,10 @@ function runOcrOn(row, statusFn){
    every time. When the page-wide pass misses a field - and on a bad scan it
    will - dragging a box round the number beats typing it, and beats trusting
    a guess nobody checked. */
-function readRegion(row, rect, statusFn){
+function readRegion(row, rect, statusFn, source){
   return ensureTesseract().then(function(){
     statusFn('Cropping…');
-    return loadImg(row.img.dataUrl);
+    return loadImg((source || row.img).dataUrl);
   }).then(function(img){
     var sc = Math.max(2, Math.min(6, 420 / Math.max(8, rect.h)));
     var cv = document.createElement('canvas');
@@ -692,6 +788,27 @@ FORMS.verify = function(w){
     S.billCursor = (idx + 1) % S.bills.length; save(); renderAll(); }));
   if (prog.left) nav.appendChild(btn('Jump to next unverified', function(){
     var n = nextUnverified(idx); if (n >= 0){ S.billCursor = n; save(); renderAll(); } }));
+
+  /* Undoing a mistake: the wrong file on a month, or the whole set.
+     Taking the picture off keeps the month in the list, because the twelve
+     months are the shape of the report and deleting one leaves a hole in
+     every chart; deleting the month is the separate, deliberate act. */
+  var gap = el('span','flex:1 1 auto;'); nav.appendChild(gap);
+  if (b && (b.img || b.verified || num(b.kwh) !== null)) nav.appendChild(btn('Clear this bill', function(){
+    if (!confirm('Remove the picture and every figure read for ' + (b.month || 'this month') + '?' + NL2 + 'The month stays in the list, empty.')) return;
+    clearBill(b); save(); renderAll();
+  }));
+  nav.appendChild(btn('Delete this month', function(){
+    if (!confirm('Delete ' + (b.month || 'this month') + ' from the bill list?')) return;
+    S.bills.splice(idx, 1);
+    S.billCursor = Math.max(0, Math.min(idx, S.bills.length - 1));
+    save(); renderAll();
+  }));
+  nav.appendChild(btn('Start over — clear all bills', function(){
+    if (!confirm('Clear every bill?' + NL2 + 'All ' + S.bills.length + ' months, their pictures and their figures go. The twelve months of ' + S.meta.financialYear + ' are laid out again, empty.')) return;
+    resetBills();
+    save(); renderAll();
+  }));
   top.appendChild(nav);
   w.appendChild(top);
 
@@ -819,23 +936,39 @@ FORMS.verify = function(w){
     'Click a field on the left, press Read a box, then drag a box round that number on the bill.' :
     'No image for this month — upload one below and it attaches here.');
   if (b.img){
+    /* A bill of several sheets: the figures are on one of them and the
+       tariff detail on another, so both have to be reachable. */
+    if (b.pages && b.pages.length > 1){
+      var strip = el('div','display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center;');
+      strip.appendChild(el('span','font-size:12px;color:var(--ink-3);', b.pages.length + ' sheets in this bill:'));
+      b.pages.forEach(function(pg, pi){
+        var on = (b.pageView || 0) === pi;
+        var pb = btn('Sheet ' + pg.no + (pg.no === b.mainPage ? ' ✓' : ''), function(){
+          b.pageView = pi; b.zoom = null; b.panX = 0; b.panY = 0; save(); renderAll();
+        }, on ? 'primary' : '');
+        if (pg.no === b.mainPage) pb.title = 'The sheet the figures were read from.';
+        strip.appendChild(pb);
+      });
+      rc.appendChild(strip);
+    }
     var zoomWrap = el('div','display:flex;gap:10px;align-items:center;margin-bottom:8px;');
     var zr = el('input'); zr.type='range'; zr.min='0.4'; zr.max='4'; zr.step='0.05';
     zr.value = String(b.zoom || 1); zr.style.flex = '1';
     var view = el('div','position:relative;overflow:hidden;background:#f1f4f7;border:1px solid var(--rule);' +
       'border-radius:6px;height:min(74vh,860px);cursor:grab;');
     var im = el('img','position:absolute;transform-origin:0 0;user-select:none;-webkit-user-drag:none;max-width:none;');
-    im.src = b.img.dataUrl; im.alt = 'Electricity bill ' + (b.month || '');
+    var shown = (b.pages && b.pages[b.pageView || 0]) ? b.pages[b.pageView || 0].img : b.img;
+    im.src = shown.dataUrl; im.alt = 'Electricity bill ' + (b.month || '');
     view.appendChild(im);
 
     var st = { z: b.zoom || null, x: b.panX || 0, y: b.panY || 0 };
     function fit(){
       var vw = view.clientWidth || 600;
-      st.z = Math.min(vw / b.img.w, (view.clientHeight||700) / b.img.h);
-      st.x = (vw - b.img.w * st.z) / 2; st.y = 0;
+      st.z = Math.min(vw / shown.w, (view.clientHeight||700) / shown.h);
+      st.x = (vw - shown.w * st.z) / 2; st.y = 0;
     }
     function paint(){
-      im.style.width = b.img.w + 'px';
+      im.style.width = shown.w + 'px';
       im.style.transform = 'translate(' + st.x + 'px,' + st.y + 'px) scale(' + st.z + ')';
       zr.value = String(st.z);
     }
@@ -917,12 +1050,12 @@ FORMS.verify = function(w){
         box0 = null;
         marquee.style.display = 'none';
         var rect = { x:Math.max(0,p1.x), y:Math.max(0,p1.y),
-                     w:Math.min(b.img.w,p2.x) - Math.max(0,p1.x),
-                     h:Math.min(b.img.h,p2.y) - Math.max(0,p1.y) };
+                     w:Math.min(shown.w,p2.x) - Math.max(0,p1.x),
+                     h:Math.min(shown.h,p2.y) - Math.max(0,p1.y) };
         if (rect.w < 6 || rect.h < 5){ readStatus.textContent = 'Box too small \u2014 drag across the whole number.'; return; }
         if (!BILL_FOCUS){ readStatus.textContent = 'Click the field you want first, then drag the box.'; return; }
         readStatus.textContent = 'Reading' + '…';
-        readRegion(b, rect, function(t){ readStatus.textContent = t; })
+        readRegion(b, rect, function(t){ readStatus.textContent = t; }, shown)
           .then(function(res){
             if (res.value === null && !res.raw){
               readStatus.textContent = 'Nothing readable in that box.'; return;
