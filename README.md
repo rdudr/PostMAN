@@ -21,7 +21,8 @@ built from the parts in `src/` by `python src/build.py`.
 Every keystroke is saved in the browser, as it always was, and the tool runs
 with no network at all. Beside that there is now a server — **Server & my
 reports** in the Closing group — at
-`https://eassiitgn.arenergyservices.in`: sign in and the report is saved
+`https://eass.eassiitgn.page` — the team's own machine at IIT Gandhinagar,
+published through the Cloudflare tunnel already running on it: sign in and the report is saved
 there too, listed for the whole team, with every earlier save kept. Two
 people on one report do not overwrite each other; the second save is refused
 and the editor offers to reload or to keep yours as a separate report. The
