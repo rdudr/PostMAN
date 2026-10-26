@@ -208,6 +208,15 @@ table.ed td.act{width:1%;padding:0 4px;text-align:center}
 .scaler{transform-origin:top left}
 #measure{position:absolute;left:-99999px;top:0;visibility:hidden}
 
+/* ---- the sign-in page, over everything until it is answered ---- */
+#gate{display:none}
+body.gated #gate{display:block;position:fixed;inset:0;z-index:100;background:var(--bg);
+  overflow:auto;padding:min(12vh,110px) 20px 40px}
+body.gated #top,body.gated #shell{display:none!important}
+#gate input{width:100%}
+#gate details>summary{list-style:none}
+#gate details>summary::-webkit-details-marker{display:none}
+
 /* ---- print ---- */
 @media print{
   @page{size:794px 1123px;margin:0}
@@ -253,6 +262,7 @@ table.ed td.act{width:1%;padding:0 4px;text-align:center}
 #inbox .row{display:flex;gap:8px;flex-wrap:wrap}
 </style>
 
+<div id="gate"></div>
 <div id="top">
   <button class="btn ghost sm" id="navtoggle" style="display:none">Sections</button>
   <span class="brand">Post<i>Man</i></span>
@@ -570,6 +580,10 @@ function migrateState(){
 }
 function deepMerge(base, over){
   if (over === null || over === undefined) return base;
+  /* A default of null - nobody signed in, no logo chosen - is a hole, not an
+     object to merge into: typeof null is "object" and "key in null" throws,
+     which would lose the whole draft on the next reload. */
+  if (base === null || base === undefined) return over;
   if (Array.isArray(base) || Array.isArray(over)) return Array.isArray(over) ? over : base;
   if (typeof base !== 'object' || typeof over !== 'object') return over;
   var out = {}, k;
@@ -708,6 +722,7 @@ function uid(){ return 'r' + Math.random().toString(36).slice(2,9); }
    =================================================================== */
 
 var SECTIONS = [
+  { id:'home',        group:'Front matter', title:'Home',                  always:true, tool:true },
   { id:'cover',       group:'Front matter', title:'Cover & report',        always:true },
   { id:'team',        group:'Front matter', title:'Assessment team',       always:true },
   { id:'frontText',   group:'Front matter', title:'Preface & disclaimer',  always:true },
@@ -1072,20 +1087,12 @@ function gridOf(nodes, two){
   nodes.forEach(function(n){ if (n) g.appendChild(n); });
   return g;
 }
-function fillMonths(list, fy, key){
-  var labels = fyMonths(fy);
-  if (list.length === 12) { labels.forEach(function(l,i){ list[i].month = l; }); return; }
-  list.length = 0;
-  labels.forEach(function(l){ var o = { month:l }; o[key] = null; list.push(o); });
-}
-
 /* ---- navigation ---- */
 function completion(sec){
   var d;
   switch (sec.id){
     case 'cover': return (S.company.name && S.company.addr1) ? 'on' : (S.company.name ? 'part' : '');
     case 'team': return S.team.plant.length ? 'on' : 'part';
-    case 'ledger': return S.ledger.length ? (rollUp(S.ledger).draft ? 'part' : 'on') : '';
     case 'production': return S.production.intro ? 'on' : '';
     case 'baseline': return S.baseline.elec.some(function(r){ return num(r.kwh); }) ? 'on' : '';
     case 'water': return (S.baseline.waterRows || []).length ? 'on' : '';
@@ -1456,27 +1463,9 @@ var MODULE_NAMES = { bills:'Electricity bill',
 var RECO_CHAPTERS = ['bills','boiler','tfh','compressor','coolingTower','chiller','pumps',
   'jets','lux','solar','earth','machines','sop'];
 
-FORMS.ledger = function(w){
-  var c = card('Recommendation ledger',
-    'Every recommendation in the report, grouped by the chapter it belongs to. Each one prints at the end of its chapter with its title, observation, recommendation, any photographs or tables, and its benefit worked out in the open. The Certificate, the Executive Summary and the savings table are all read from here.');
-  var t = rollUp(S.ledger);
-  c.appendChild(el('p','', S.ledger.length
-    ? S.ledger.length + ' recommendation' + (S.ledger.length === 1 ? '' : 's') + ' \u00B7 ' + rupees(t.moneyTotal) + ' a year \u00B7 payback ' + months(t.roi)
-    : 'No recommendations yet. Add one under the chapter it belongs to.')).className = 'callout info';
-  w.appendChild(c);
-
-  /* Chapters in report order; a chapter with recommendations always shows,
-     an empty utility chapter only if it is switched on for this report. */
-  /* The offered chapters first; any legacy chapter only if it has rows. */
-  var order = RECO_CHAPTERS.concat(Object.keys(MODULE_NAMES).filter(function(k){ return RECO_CHAPTERS.indexOf(k) < 0; }));
-  order.forEach(function(mid){
-    var sec = sectionById(mid);
-    var has = S.ledger.some(function(r){ return r.module === mid; });
-    if (!has && RECO_CHAPTERS.indexOf(mid) < 0) return;
-    if (!has && sec && sec.opt && !S.enabled[sec.opt]) return;
-    chapterRecoCard(w, mid, { showModule:true });
-  });
-};
+/* The recommendation ledger has no screen of its own: every chapter
+   carries its own recommendations, which is where an engineer is when
+   they think of one. */
 
 /* ---------------- Production process ---------------- */
 FORMS.production = function(w){
@@ -3412,6 +3401,10 @@ function importDrop(opts){
         try {
           var log = importAny(wb, f.name);
           lines.push(log.length ? ['ok', f.name + ': ' + log.join('; ')] : ['bad', f.name + ': nothing recognised (sheets: ' + Object.keys(wb.Sheets).join(', ') + ')']);
+          /* The file itself goes to the server as well, so the next person
+             has what was measured and not only what this report made of it.
+             It never blocks or fails the import. */
+          if (log.length && typeof cloudArchiveFile === 'function') cloudArchiveFile(f, log.join('; '));
         } catch (err){ lines.push(['bad', f.name + ': ' + err.message]); }
         next();
       }).catch(function(e){ lines.push(['bad', f.name + ': ' + e.message]); next(); });
@@ -6344,11 +6337,6 @@ function toeFactorLines(which){
 /* ------------------------------------------------------------------
    THE PRINT
    ------------------------------------------------------------------ */
-function baselineTable(head, groups, rows, opts){
-  /* groups: a first header row of merged group titles; head: the second row */
-  var g = groups.map(function(x){ return { v:x.t, tone:'head', span:x.span }; });
-  return tblBlock(head, [g].concat(rows), opts);
-}
 function buildBaselineSection(B){
   var C0 = baselineCalc();
   B.push(blk(bH(1,'Baseline of plant energy consumption')));
@@ -9167,10 +9155,6 @@ var APPS = [
     note:'FAD or pump-up test, specific energy consumption.' }
 ];
 
-function appById(id){
-  for (var i = 0; i < APPS.length; i++) if (APPS[i].id === id) return APPS[i];
-  return null;
-}
 /* Thermo-X fills the boiler and TFH chapters through p20_thermox.js.
    URLs live in state so a redeploy that moves an app is a field edit,
    not a code change and a rebuild. */
@@ -9567,7 +9551,7 @@ var EASS_DEFAULT = 'https://eass.eassiitgn.page';
 
 function blankCloud(){
   return { server:EASS_DEFAULT, token:'', user:null, reportId:'', version:0,
-           lastSaved:'', lastError:'', dirty:false, autosave:true };
+           lastSaved:'', lastError:'', dirty:false, autosave:true, offlineChosen:false };
 }
 function cloudState(){
   if (!S.cloud) S.cloud = blankCloud();
@@ -9616,7 +9600,9 @@ function cloudLogin(email, password){
 function cloudLogout(){
   var c = cloudState();
   c.token = ''; c.user = null; c.reportId = ''; c.version = 0; c.lastSaved = '';
-  save(); renderAll();
+  c.offlineChosen = false;     /* the door asks again next time */
+  save();
+  if (typeof gateShow === 'function') gateShow(); else renderAll();
 }
 
 /* What the list shows about a report without opening it. */
@@ -9631,11 +9617,34 @@ function cloudCard(){
   };
 }
 /* The draft as it stands, minus the cloud block itself - a report should
-   not carry somebody's session token into the database. */
+   not carry somebody's session token into the database - and minus which
+   screen is open, which belongs to the person reading, not to the report. */
+var CLOUD_SKIP = { cloud:1, active:1 };
 function cloudPayload(){
   var out = {};
-  Object.keys(S).forEach(function(k){ if (k !== 'cloud') out[k] = S[k]; });
+  Object.keys(S).forEach(function(k){ if (!CLOUD_SKIP[k]) out[k] = S[k]; });
   return out;
+}
+
+/* What the server already holds, as one string. Moving between screens is
+   a change to the draft but not to the report, and a version per click
+   would make the history unreadable. */
+var CLOUD_SIG = '';
+function cloudSig(){ try { return JSON.stringify(cloudPayload()); } catch (e){ return ''; } }
+
+/* Starting a fresh report should not sign anybody out: the session belongs
+   to the person, the report id belongs to the report. Take the session
+   before S is replaced, hand it back afterwards. */
+function cloudSession(){
+  var c = cloudState();
+  return { server:c.server, token:c.token, user:c.user, autosave:c.autosave, offlineChosen:c.offlineChosen };
+}
+function cloudNewReport(sess){
+  sess = sess || {};
+  S.cloud = { server:sess.server || EASS_DEFAULT, token:sess.token || '', user:sess.user || null,
+              autosave:sess.autosave !== false, offlineChosen:!!sess.offlineChosen,
+              reportId:'', version:0, lastSaved:'', lastError:'', dirty:false };
+  CLOUD_SIG = '';
 }
 
 function cloudSave(note){
@@ -9652,6 +9661,7 @@ function cloudSave(note){
     p = cloudFetch('/api/reports', { method:'POST', body:body });
   }
   return p.then(function(r){
+    CLOUD_SIG = JSON.stringify(body.state);
     c.reportId = r.id; c.version = r.version; c.dirty = false; c.lastError = '';
     c.lastSaved = new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
     save(); paintCloudStrip();
@@ -9671,9 +9681,11 @@ function cloudOpen(id){
   return cloudFetch('/api/reports/' + encodeURIComponent(id)).then(function(r){
     var keep = cloudState();
     var cloud = { server:keep.server, token:keep.token, user:keep.user, autosave:keep.autosave,
-                  reportId:r.id, version:r.version, lastSaved:'opened', lastError:'', dirty:false };
+                  offlineChosen:keep.offlineChosen, reportId:r.id, version:r.version,
+                  lastSaved:'opened', lastError:'', dirty:false };
     S = deepMerge(blankState(), r.state || {});
     S.cloud = cloud;
+    CLOUD_SIG = cloudSig();      /* just arrived from the server - nothing to push */
     if (typeof migrateState === 'function') migrateState();
     saveNow(); renderAll();
     return r;
@@ -9697,6 +9709,9 @@ function cloudTouch(){
   clearTimeout(CLOUD_T);
   CLOUD_T = setTimeout(function(){
     if (CLOUD_BUSY) { cloudTouch(); return; }
+    if (c.reportId && cloudSig() === CLOUD_SIG){
+      c.dirty = false; paintCloudStrip(); return;   /* nothing actually changed */
+    }
     CLOUD_BUSY = true;
     cloudSave('autosave').catch(function(){ /* the strip already says so */ })
       .then(function(){ CLOUD_BUSY = false; });
@@ -9931,13 +9946,263 @@ function cloudImport(u){
   }
 }
 
-/* Sending this report's own imports up, so the next person has them too. */
-function cloudPushUpload(app, filename, blobB64, summary){
+/* A file dropped into this report, kept on the server too, so the next
+   person has what was measured and not only what this report made of it.
+   Which app it came from is decided the way the importer decides it. */
+function cloudAppOf(name, log){
+  var t = (name + ' ' + (log || '')).toLowerCase();
+  if (/thermo/.test(t)) return 'thermox';
+  if (/a-?cmp|compressor/.test(t)) return 'acmp';
+  if (/fox|pcc|mcc|apfc/.test(t)) return 'fox';
+  if (/jet/.test(t)) return 'jeteff';
+  if (/pq|postman-pq|recording/.test(t)) return 'aipqa';
+  return 'other';
+}
+function cloudArchiveFile(file, summary){
   if (!signedIn()) return Promise.resolve(null);
-  return cloudFetch('/api/ingest', { method:'POST', body:{
-    app:app, company_name:(S.company && S.company.name) || '', filename:filename,
-    report_id:cloudState().reportId || null, blob_b64:blobB64, summary:summary || ''
-  } }).catch(function(){ return null; });   /* never let a copy-up break an import */
+  return new Promise(function(res){
+    var r = new FileReader();
+    r.onload = function(){
+      var s = String(r.result);
+      res(s.slice(s.indexOf(',') + 1));      /* data:...;base64,XXXX */
+    };
+    r.onerror = function(){ res(null); };
+    r.readAsDataURL(file);
+  }).then(function(b64){
+    if (!b64) return null;
+    return cloudFetch('/api/ingest', { method:'POST', body:{
+      app: cloudAppOf(file.name, summary), company_name:(S.company && S.company.name) || '',
+      filename:file.name, content_type:file.type || '', report_id:cloudState().reportId || null,
+      blob_b64:b64, summary:summary || ''
+    } });
+  }).catch(function(){ return null; });   /* never let the copy-up break an import */
+}
+
+
+/* ===================================================================
+   THE DOOR, AND WHAT IS BEHIND IT
+
+   Opening the tool used to drop you straight onto the cover of whatever
+   draft the browser happened to hold. With a server there is a better
+   first question: who are you, and which report do you want? So the app
+   opens on a sign-in page, and once you are in, on a home page that shows
+   the report you were last working on, the rest of the team's reports, and
+   the two ways to start something new.
+
+   Signing in is NOT compulsory. "Work offline" is one click and everything
+   behaves as it always did - a laptop in a plant basement with no signal
+   has to keep working, and a tool that refuses to open without a server is
+   a tool somebody will stop carrying.
+   =================================================================== */
+
+function gateNeeded(){
+  var c = cloudState();
+  /* Asked once per browser: somebody who chose to work offline is not
+     asked again until they sign out or clear the draft. */
+  return !signedIn() && !c.offlineChosen;
+}
+function gateDismiss(){
+  var c = cloudState();
+  c.offlineChosen = true; save();
+  document.body.classList.remove('gated');
+  renderAll();
+}
+function gateShow(){
+  document.body.classList.add('gated');
+  var host = q('gate');
+  clear(host);
+  var box = el('div','max-width:440px;margin:0 auto;');
+  box.appendChild(el('div','font-size:30px;font-weight:700;letter-spacing:-.02em;margin-bottom:2px;', 'PostMan'));
+  box.appendChild(el('div','font-size:13.5px;color:var(--ink-2);margin-bottom:22px;',
+    'KISEM Detailed Energy Assessment reports \u2014 IEA, IIT Gandhinagar'));
+
+  var card1 = el('div','border:1px solid var(--line);border-radius:12px;padding:18px 20px;background:var(--panel);');
+  card1.appendChild(el('div','font-weight:600;margin-bottom:3px;', 'Sign in'));
+  card1.appendChild(el('div','font-size:12.5px;color:var(--ink-3);margin-bottom:14px;',
+    'Your reports, the team\u2019s reports and every file the field apps have sent.'));
+
+  var em = el('input'); em.type = 'email'; em.placeholder = 'you@iitgn.ac.in'; em.autocomplete = 'username';
+  var pw = el('input'); pw.type = 'password'; pw.placeholder = 'Password'; pw.autocomplete = 'current-password';
+  card1.appendChild(labelled('Email', em));
+  card1.appendChild(labelled('Password', pw));
+  var msg = el('p','margin-top:10px;'); msg.className = 'callout'; msg.hidden = true;
+  var go = btn('Sign in', function(){
+    if (!em.value.trim() || !pw.value){ msg.hidden = false; msg.className = 'callout bad'; msg.textContent = 'Email and password, please.'; return; }
+    msg.hidden = false; msg.className = 'callout'; msg.textContent = 'Signing in\u2026';
+    go.disabled = true;
+    cloudLogin(em.value.trim(), pw.value).then(function(){
+      document.body.classList.remove('gated');
+      S.active = 'home'; save(); renderAll();
+    }).catch(function(e){
+      go.disabled = false;
+      msg.className = 'callout bad'; msg.textContent = e.message;
+    });
+  }, 'primary');
+  pw.addEventListener('keydown', function(e){ if (e.key === 'Enter') go.click(); });
+  em.addEventListener('keydown', function(e){ if (e.key === 'Enter') pw.focus(); });
+  var row = el('div','display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap;');
+  row.appendChild(go);
+  row.appendChild(btn('Work offline', gateDismiss));
+  card1.appendChild(row);
+  card1.appendChild(msg);
+  box.appendChild(card1);
+
+  var srv = el('details','margin-top:12px;font-size:12.5px;color:var(--ink-3);');
+  srv.appendChild(el('summary','cursor:pointer;', 'Server address'));
+  var url = el('input'); url.type = 'text'; url.value = cloudState().server; url.style.marginTop = '6px';
+  url.addEventListener('input', function(){ cloudState().server = url.value.trim(); save(); });
+  srv.appendChild(url);
+  srv.appendChild(el('p','margin-top:6px;',
+    'The KISEM server at IIT Gandhinagar. Change it only to work against another one.'));
+  box.appendChild(srv);
+
+  box.appendChild(el('p','margin-top:18px;font-size:12px;color:var(--ink-3);',
+    'No account? An administrator makes one for you. Working offline keeps everything in this browser \u2014 you can sign in later and push the report up.'));
+  host.appendChild(box);
+  setTimeout(function(){ em.focus(); }, 60);
+}
+
+/* ------------------------------------------------------------------
+   HOME - where you land after signing in
+   ------------------------------------------------------------------ */
+function homeOpenLast(){
+  var c = cloudState();
+  if (c.reportId) return cloudOpen(c.reportId);
+  return cloudReports(false).then(function(rows){
+    if (!rows.length) throw new Error('No reports on the server yet.');
+    return cloudOpen(rows[0].id);
+  });
+}
+
+FORMS.home = function(w){
+  var c = cloudState();
+
+  /* --- the draft in this browser --- */
+  var co = (S.company && S.company.name) || '';
+  var head = card(co ? co : 'A new report',
+    c.reportId ? 'Open on the server as version ' + c.version + (c.lastSaved ? ', saved ' + c.lastSaved : '') + '.'
+               : 'This draft is in this browser only \u2014 nothing on the server yet.');
+  var k = el('div'); k.className = 'kpis';
+  var bills = (S.bills || []).filter(function(b){ return num(b.kwh) !== null; }).length;
+  var recos = (S.ledger || []).length;
+  [['Report', reportNumber(S.meta.financialYear, S.meta.serial)],
+   ['Financial year', S.meta.financialYear || '\u2014'],
+   ['Bills entered', String(bills)],
+   ['Recommendations', String(recos)]].forEach(function(p){
+    var x = el('div'); x.className = 'kpi';
+    x.appendChild(el('span','', p[0])).className = 'k';
+    x.appendChild(el('span','', p[1])).className = 'v';
+    k.appendChild(x);
+  });
+  head.appendChild(k);
+  var bar = el('div','display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;');
+  bar.appendChild(btn('Carry on with this report', function(){ S.active = 'cover'; save(); renderAll(); }, 'primary'));
+  if (signedIn()) bar.appendChild(btn(c.reportId ? 'Save now' : 'Put it on the server', function(){
+    cloudSave('manual save').then(function(){ renderAll(); }).catch(function(e){ alert(e.message); });
+  }));
+  bar.appendChild(btn('Start a new report', function(){
+    if (!confirm('Start a new, empty report?\n\nThis draft is replaced in this browser' +
+                 (c.reportId ? ' \u2014 the copy on the server stays.' : ' and is not on the server.'))) return;
+    var sess = cloudSession();
+    S = blankState(); cloudNewReport(sess);
+    S.active = 'cover'; saveNow(); renderAll();
+  }));
+  bar.appendChild(btn('Load the sample report', function(){
+    if (!confirm('Load the worked example?\n\nIt replaces this draft with a complete report \u2014 bills, baseline, utilities and recommendations \u2014 to look at and take apart.')) return;
+    var b = document.getElementById('demo'); if (b) b.click();
+  }));
+  head.appendChild(bar);
+  w.appendChild(head);
+
+  if (!signedIn()){
+    var off = card('Working offline',
+      'Everything is kept in this browser, as it always was. Sign in to put this report on the server, where the team can open it and every save is kept.');
+    off.appendChild(btn('Sign in', function(){ cloudState().offlineChosen = false; save(); gateShow(); }, 'primary'));
+    w.appendChild(off);
+    homeGuides(w);
+    return;
+  }
+
+  /* --- the team's reports --- */
+  var rc = card('Reports on the server', 'Newest first. Opening one replaces the draft in this browser.');
+  /* Coming back to a half-finished assessment is the common case, so it is
+     one button rather than a hunt down the list. */
+  if (!c.reportId) rc.appendChild(btn('Open the last one saved', function(){
+    homeOpenLast().catch(function(e){ alert(e.message); });
+  }, 'primary'));
+  var list = el('div','margin-top:4px;');
+  rc.appendChild(list);
+  w.appendChild(rc);
+  list.appendChild(el('p','', 'Asking the server\u2026'));
+  cloudReports(false).then(function(rows){
+    clear(list);
+    if (!rows.length){ list.appendChild(el('p','', 'Nothing saved yet. Put this report up and it will be here.')); return; }
+    rows.slice(0, 12).forEach(function(r){
+      var row = el('div','display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--line-2);');
+      var m = el('div','flex:1 1 240px;min-width:0;');
+      m.appendChild(el('strong','display:block;font-size:13px;', r.company_name || r.title || 'Untitled'));
+      m.appendChild(el('span','font-size:11.5px;color:var(--ink-3);',
+        [r.report_no, r.financial_year, 'v' + r.version, r.updated_at, r.updated_by].filter(Boolean).join(' \u00B7 ')));
+      row.appendChild(m);
+      if (r.id === c.reportId) row.appendChild(el('span','font-size:11px;color:var(--ok);', 'open here'));
+      else row.appendChild(btn('Open', function(){
+        if (c.dirty && !confirm('Open ' + (r.company_name || 'that report') + '?\n\nThis draft has changes that are not on the server; they are replaced.')) return;
+        cloudOpen(r.id).catch(function(e){ alert(e.message); });
+      }, 'sm'));
+      list.appendChild(row);
+    });
+    if (rows.length > 12) list.appendChild(el('p','margin-top:6px;font-size:12px;color:var(--ink-3);',
+      rows.length - 12 + ' more on the Server & my reports screen.'));
+  }).catch(function(e){ clear(list); list.appendChild(el('p','', e.message)).className = 'callout bad'; });
+
+  /* --- who has been in --- */
+  var ac = card('Recent activity', 'Who opened or saved what, and the files the field apps sent.');
+  var alist = el('div','margin-top:4px;');
+  ac.appendChild(alist);
+  w.appendChild(ac);
+  alist.appendChild(el('p','', 'Asking the server\u2026'));
+  cloudFetch('/api/activity?limit=14').then(function(rows){
+    clear(alist);
+    if (!rows.length){ alist.appendChild(el('p','', 'Nothing yet.')); return; }
+    var words = { open:'opened', save:'saved', create:'started', upload:'sent', archive:'archived',
+                  'company-add':'added the company', 'company-update':'updated the company' };
+    rows.forEach(function(a){
+      var line = el('div','display:flex;gap:8px;padding:3px 0;font-size:12.5px;border-bottom:1px solid var(--line-2);');
+      line.appendChild(el('span','color:var(--ink-3);font-family:\'IBM Plex Mono\',monospace;flex:0 0 118px;', a.at));
+      line.appendChild(el('span','flex:1 1 auto;', (a.who || 'somebody') + ' ' + (words[a.action] || a.action) +
+        (a.subject ? ' \u2014 ' + a.subject : '') + (a.detail ? ' (' + a.detail + ')' : '')));
+      alist.appendChild(line);
+    });
+  }).catch(function(e){ clear(alist); alist.appendChild(el('p','', e.message)).className = 'callout bad'; });
+
+  homeGuides(w);
+};
+
+/* The short version of how the tool is meant to be used, where somebody
+   opening it for the first time will actually see it. */
+function homeGuides(w){
+  var g = card('How a report gets made', 'Each step is a screen on the left; you can do them in any order.');
+  var steps = [
+    ['Cover & report', 'The company, the financial year, the logo and the gate photograph.'],
+    ['Bill capture & verify', 'Drop the electricity bill PDFs in. The figures are read out and shown beside the bill \u2014 check them and press Verify.'],
+    ['Import field data', 'One drop box for every workbook: FOX KISEM, Thermo-X, JET-Eff, A-CMP and the PQ analyser\u2019s exports. Nothing is retyped.'],
+    ['Energy baseline & GHG', 'Months chosen from menus, production in the plant\u2019s own unit, and the emission factors; TOE, SEC and the charts follow.'],
+    ['The utilities', 'Switch on only what the plant has. Each chapter prints what its app measured.'],
+    ['Recommendations', 'On every chapter screen: the observation, the recommendation, the saving worked in the open, and the payback.'],
+    ['Print / PDF', 'True A4, one page per page. The Contents links to the pages and every chapter opens a new one.']
+  ];
+  steps.forEach(function(s, i){
+    var row = el('div','display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--line-2);');
+    row.appendChild(el('span','flex:0 0 22px;color:var(--ink-3);font-family:\'IBM Plex Mono\',monospace;', String(i + 1)));
+    var t = el('div','flex:1 1 auto;');
+    t.appendChild(el('strong','display:block;font-size:12.5px;', s[0]));
+    t.appendChild(el('span','font-size:12px;color:var(--ink-2);', s[1]));
+    row.appendChild(t);
+    g.appendChild(row);
+  });
+  g.appendChild(el('p','margin-top:10px;font-size:12px;color:var(--ink-3);',
+    'The sample report above is a finished one to look at: every chapter filled in, with the figures that produced it.'));
+  w.appendChild(g);
 }
 
 
@@ -12151,7 +12416,9 @@ q('guides').addEventListener('change', drawPreview);
 q('print').addEventListener('click', function(){ window.print(); });
 q('reset').addEventListener('click', function(){
   if (!confirm('Clear this draft and start a new report?')) return;
-  S = blankState(); save(); renderAll();
+  var sess = cloudSession();
+  S = blankState(); cloudNewReport(sess);
+  save(); renderAll();
 });
 
 document.querySelectorAll('.vtab').forEach(function(t){
@@ -12190,7 +12457,8 @@ syncNavToggle();
    with a real shape of report rather than an empty one. ---- */
 q('demo').addEventListener('click', function(){
   if (S.company.name && !confirm('Replace the current draft with the sample report?')) return;
-  S = blankState();
+  var sess = cloudSession();
+  S = blankState(); cloudNewReport(sess);
   S.company = { name:'Shree Mahadev Silk Mills Pvt. Ltd.',
     addr1:'Survey No. 142, Kadodara\u2013Bardoli Road', addr2:'Palsana Industrial Estate',
     district:'Surat', state:'Gujarat', pincode:'394315',
@@ -12320,5 +12588,9 @@ q('demo').addEventListener('click', function(){
 });
 
 renderAll();
+
+/* The sign-in page comes up over everything until it is answered - or
+   dismissed with "Work offline", which is remembered. */
+if (typeof gateNeeded === 'function' && gateNeeded()) gateShow();
 
 </script>

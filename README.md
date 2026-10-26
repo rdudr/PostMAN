@@ -179,6 +179,11 @@ beside the fields.
    "Start a new page here" block breaks wherever you like.
 8. **Print / PDF** — true A4, one page per page.
 
+## Going live
+
+The ordered list of what is left to do - start the server, point the name at
+it, add the accounts, back the folder up - is [`docs/START-HERE.md`](docs/START-HERE.md).
+
 ## Also in this folder
 
 `report design\` the KISEM cover and letterhead artwork as supplied ·

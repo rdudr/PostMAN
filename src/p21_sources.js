@@ -44,10 +44,6 @@ var APPS = [
     note:'FAD or pump-up test, specific energy consumption.' }
 ];
 
-function appById(id){
-  for (var i = 0; i < APPS.length; i++) if (APPS[i].id === id) return APPS[i];
-  return null;
-}
 /* Thermo-X fills the boiler and TFH chapters through p20_thermox.js.
    URLs live in state so a redeploy that moves an app is a field edit,
    not a code change and a rebuild. */

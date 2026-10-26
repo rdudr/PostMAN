@@ -24,7 +24,26 @@ from typing import Any, Iterable
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 IS_PG = DATABASE_URL.startswith("postgres")
-SQLITE_PATH = os.environ.get("SQLITE_PATH", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "eass.db"))
+
+# Everything the server keeps lives in one folder, so a backup is a folder
+# copy and an engineer can see the work on the machine without a database
+# client. On the AI server that is "KISEM Project" on the desktop; DATA_DIR
+# overrides it anywhere else.
+def _default_data_dir() -> str:
+    home = os.path.expanduser("~")
+    desktop = os.path.join(home, "Desktop")
+    base = desktop if os.path.isdir(desktop) else home
+    return os.path.join(base, "KISEM Project")
+
+
+DATA_DIR = os.path.abspath(os.environ.get("DATA_DIR", "").strip() or _default_data_dir())
+UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")     # the field apps' files, as files
+BACKUP_DIR = os.path.join(DATA_DIR, "backups")
+LOG_DIR = os.path.join(DATA_DIR, "logs")
+for _d in (DATA_DIR, UPLOAD_DIR, BACKUP_DIR, LOG_DIR):
+    os.makedirs(_d, exist_ok=True)
+
+SQLITE_PATH = os.environ.get("SQLITE_PATH", "").strip() or os.path.join(DATA_DIR, "eass.db")
 
 JSON_T = "JSONB" if IS_PG else "TEXT"
 _local = threading.local()
@@ -193,7 +212,42 @@ DDL = [
         detail   TEXT NOT NULL DEFAULT ''
     )
     """,
+    f"""
+    CREATE TABLE IF NOT EXISTS company_profiles (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        address     TEXT NOT NULL DEFAULT '',
+        area        TEXT NOT NULL DEFAULT '',
+        district    TEXT NOT NULL DEFAULT '',
+        state       TEXT NOT NULL DEFAULT '',
+        pincode     TEXT NOT NULL DEFAULT '',
+        contact     TEXT NOT NULL DEFAULT '',
+        designation TEXT NOT NULL DEFAULT '',
+        phone       TEXT NOT NULL DEFAULT '',
+        email       TEXT NOT NULL DEFAULT '',
+        notes       TEXT NOT NULL DEFAULT '',
+        profile     {JSON_T},
+        created_by  TEXT,
+        created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS access_log (
+        id        TEXT PRIMARY KEY,
+        at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        who       TEXT,
+        who_name  TEXT NOT NULL DEFAULT '',
+        action    TEXT NOT NULL,
+        report_id TEXT,
+        subject   TEXT NOT NULL DEFAULT '',
+        detail    TEXT NOT NULL DEFAULT ''
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS reports_company ON reports (company_name)",
+    "CREATE INDEX IF NOT EXISTS access_report ON access_log (report_id, at)",
+    "CREATE INDEX IF NOT EXISTS access_when ON access_log (at)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS company_name_u ON company_profiles (name)",
     "CREATE INDEX IF NOT EXISTS versions_report ON report_versions (report_id, version)",
     "CREATE INDEX IF NOT EXISTS uploads_company ON app_uploads (company_name, app)",
 ]
@@ -202,6 +256,21 @@ DDL = [
 def init_db() -> None:
     for stmt in DDL:
         run(stmt)
+
+
+def trail(user, action: str, report_id: str | None = None, subject: str = "", detail: str = "") -> None:
+    """Who opened or saved what, and when. Kept apart from the audit line
+    because this one is meant to be READ - by the team, on a screen, when
+    somebody asks who changed the figure."""
+    try:
+        run(
+            "INSERT INTO access_log (id, who, who_name, action, report_id, subject, detail)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (new_id(), getattr(user, "id", None), getattr(user, "name", "") or getattr(user, "email", ""),
+             action, report_id, subject[:300], detail[:1000]),
+        )
+    except Exception:  # noqa: BLE001 - a trail entry must never fail the request it describes
+        pass
 
 
 def log(who: str | None, what: str, subject: str = "", detail: str = "") -> None:

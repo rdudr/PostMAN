@@ -9,6 +9,7 @@
    =================================================================== */
 
 var SECTIONS = [
+  { id:'home',        group:'Front matter', title:'Home',                  always:true, tool:true },
   { id:'cover',       group:'Front matter', title:'Cover & report',        always:true },
   { id:'team',        group:'Front matter', title:'Assessment team',       always:true },
   { id:'frontText',   group:'Front matter', title:'Preface & disclaimer',  always:true },

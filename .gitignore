@@ -35,3 +35,6 @@ server/*.db-wal
 server/.env
 __pycache__/
 *.pyc
+
+# A local run of the API keeps its data here when DATA_DIR points at the repo.
+server/_devdata/

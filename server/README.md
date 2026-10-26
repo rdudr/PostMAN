@@ -35,12 +35,21 @@ set BOOTSTRAP_ADMIN_PASSWORD=dev-password-123
 uvicorn app.main:app --port 8800
 ```
 
-With `DATABASE_URL` unset it uses `server/eass.db`, a SQLite file. The API is
-then at `http://127.0.0.1:8800/api`, and PostMan's **Server & my reports**
-screen will talk to it if you put that address in.
+With `DATABASE_URL` unset it keeps everything in one folder - `KISEM
+Project` on the desktop, or wherever `DATA_DIR` points:
+
+```
+KISEM Project  eass.db        reports, versions, accounts, company profiles, the trail
+  uploads\       every workbook a field app or an import sent, as files
+  backups  logs```
+
+The API is then at `http://127.0.0.1:8800/api`, and PostMan's sign-in screen
+will talk to it if you put that address in the **Server address** box.
+For development, point `DATA_DIR` at a scratch folder so the real one is left
+alone.
 
 ```bash
-python scripts/smoke.py      # 37 checks, no server needed
+python scripts/smoke.py      # 50 checks, no server needed
 ```
 
 ## The API
@@ -86,7 +95,8 @@ that is the one setting people forget.
 
 1. **Copy the code** to the server (SSH is already set up:
    `ssh ssh.eassiitgn.page`). Clone or pull `rdudr/PostMAN` to, say,
-   `C:\eassepo`, make a virtual environment beside it and install
+   `C:\eass
+epo`, make a virtual environment beside it and install
    `server/requirements.txt`. On SQLite - the default - `psycopg` is not
    needed and can be skipped.
 2. **Settings:** copy `server/.env.example` to `server/.env`. Leave
@@ -108,7 +118,7 @@ that is the one setting people forget.
 | | |
 |---|---|
 | **The machine must be awake** | A desktop that sleeps takes the server with it. Set the power plan to never sleep, and check `EASS-API` and `cloudflared` are both "At startup" - `server-side\harden-server.ps1` in the remote-access folder already does most of this. |
-| **Backups** | The whole of the work is `server\eass.db`. Copy it nightly somewhere else - Task Scheduler, one line: `Copy-Item C:\eassepo\server\eass.db D:ackups\eass-$(Get-Date -f yyyy-MM-dd).db`. A desktop under a table is not a backup strategy. |
+| **Backups** | The whole of the work is the `KISEM Project` folder. Copy the database nightly - Task Scheduler, one line: `Copy-Item "$env:USERPROFILE\Desktop\KISEM Project\eass.db" "$env:USERPROFILE\Desktop\KISEM Project\backups\eass-$(Get-Date -f yyyy-MM-dd).db"` - and copy the whole folder to a separate drive weekly, because `uploads\` cannot be reconstructed. A desktop under a table is not a backup strategy. |
 | **The front door is public** | Anyone who knows the hostname can reach `/api/auth/login`. Accounts are real (scrypt, expiring tokens), but add a Cloudflare rate-limiting rule on that path. |
 | **Request size** | Cloudflare's free plan caps a request at 100 MB. A report carries its photographs and bill scans inside the document, so a heavy one will approach that eventually; that is when assets move out of the document. |
 

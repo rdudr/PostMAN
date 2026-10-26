@@ -148,27 +148,9 @@ var MODULE_NAMES = { bills:'Electricity bill',
 var RECO_CHAPTERS = ['bills','boiler','tfh','compressor','coolingTower','chiller','pumps',
   'jets','lux','solar','earth','machines','sop'];
 
-FORMS.ledger = function(w){
-  var c = card('Recommendation ledger',
-    'Every recommendation in the report, grouped by the chapter it belongs to. Each one prints at the end of its chapter with its title, observation, recommendation, any photographs or tables, and its benefit worked out in the open. The Certificate, the Executive Summary and the savings table are all read from here.');
-  var t = rollUp(S.ledger);
-  c.appendChild(el('p','', S.ledger.length
-    ? S.ledger.length + ' recommendation' + (S.ledger.length === 1 ? '' : 's') + ' · ' + rupees(t.moneyTotal) + ' a year · payback ' + months(t.roi)
-    : 'No recommendations yet. Add one under the chapter it belongs to.')).className = 'callout info';
-  w.appendChild(c);
-
-  /* Chapters in report order; a chapter with recommendations always shows,
-     an empty utility chapter only if it is switched on for this report. */
-  /* The offered chapters first; any legacy chapter only if it has rows. */
-  var order = RECO_CHAPTERS.concat(Object.keys(MODULE_NAMES).filter(function(k){ return RECO_CHAPTERS.indexOf(k) < 0; }));
-  order.forEach(function(mid){
-    var sec = sectionById(mid);
-    var has = S.ledger.some(function(r){ return r.module === mid; });
-    if (!has && RECO_CHAPTERS.indexOf(mid) < 0) return;
-    if (!has && sec && sec.opt && !S.enabled[sec.opt]) return;
-    chapterRecoCard(w, mid, { showModule:true });
-  });
-};
+/* The recommendation ledger has no screen of its own: every chapter
+   carries its own recommendations, which is where an engineer is when
+   they think of one. */
 
 /* ---------------- Production process ---------------- */
 FORMS.production = function(w){

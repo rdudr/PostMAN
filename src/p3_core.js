@@ -266,6 +266,10 @@ function migrateState(){
 }
 function deepMerge(base, over){
   if (over === null || over === undefined) return base;
+  /* A default of null - nobody signed in, no logo chosen - is a hole, not an
+     object to merge into: typeof null is "object" and "key in null" throws,
+     which would lose the whole draft on the next reload. */
+  if (base === null || base === undefined) return over;
   if (Array.isArray(base) || Array.isArray(over)) return Array.isArray(over) ? over : base;
   if (typeof base !== 'object' || typeof over !== 'object') return over;
   var out = {}, k;

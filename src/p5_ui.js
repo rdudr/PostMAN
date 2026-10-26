@@ -237,20 +237,12 @@ function gridOf(nodes, two){
   nodes.forEach(function(n){ if (n) g.appendChild(n); });
   return g;
 }
-function fillMonths(list, fy, key){
-  var labels = fyMonths(fy);
-  if (list.length === 12) { labels.forEach(function(l,i){ list[i].month = l; }); return; }
-  list.length = 0;
-  labels.forEach(function(l){ var o = { month:l }; o[key] = null; list.push(o); });
-}
-
 /* ---- navigation ---- */
 function completion(sec){
   var d;
   switch (sec.id){
     case 'cover': return (S.company.name && S.company.addr1) ? 'on' : (S.company.name ? 'part' : '');
     case 'team': return S.team.plant.length ? 'on' : 'part';
-    case 'ledger': return S.ledger.length ? (rollUp(S.ledger).draft ? 'part' : 'on') : '';
     case 'production': return S.production.intro ? 'on' : '';
     case 'baseline': return S.baseline.elec.some(function(r){ return num(r.kwh); }) ? 'on' : '';
     case 'water': return (S.baseline.waterRows || []).length ? 'on' : '';

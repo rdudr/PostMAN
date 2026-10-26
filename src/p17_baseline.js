@@ -460,11 +460,6 @@ function toeFactorLines(which){
 /* ------------------------------------------------------------------
    THE PRINT
    ------------------------------------------------------------------ */
-function baselineTable(head, groups, rows, opts){
-  /* groups: a first header row of merged group titles; head: the second row */
-  var g = groups.map(function(x){ return { v:x.t, tone:'head', span:x.span }; });
-  return tblBlock(head, [g].concat(rows), opts);
-}
 function buildBaselineSection(B){
   var C0 = baselineCalc();
   B.push(blk(bH(1,'Baseline of plant energy consumption')));

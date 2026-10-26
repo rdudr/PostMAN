@@ -8,7 +8,9 @@ q('guides').addEventListener('change', drawPreview);
 q('print').addEventListener('click', function(){ window.print(); });
 q('reset').addEventListener('click', function(){
   if (!confirm('Clear this draft and start a new report?')) return;
-  S = blankState(); save(); renderAll();
+  var sess = cloudSession();
+  S = blankState(); cloudNewReport(sess);
+  save(); renderAll();
 });
 
 document.querySelectorAll('.vtab').forEach(function(t){
@@ -47,7 +49,8 @@ syncNavToggle();
    with a real shape of report rather than an empty one. ---- */
 q('demo').addEventListener('click', function(){
   if (S.company.name && !confirm('Replace the current draft with the sample report?')) return;
-  S = blankState();
+  var sess = cloudSession();
+  S = blankState(); cloudNewReport(sess);
   S.company = { name:'Shree Mahadev Silk Mills Pvt. Ltd.',
     addr1:'Survey No. 142, Kadodara–Bardoli Road', addr2:'Palsana Industrial Estate',
     district:'Surat', state:'Gujarat', pincode:'394315',
@@ -177,3 +180,7 @@ q('demo').addEventListener('click', function(){
 });
 
 renderAll();
+
+/* The sign-in page comes up over everything until it is answered - or
+   dismissed with "Work offline", which is remembered. */
+if (typeof gateNeeded === 'function' && gateNeeded()) gateShow();

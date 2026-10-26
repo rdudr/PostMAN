@@ -28,7 +28,7 @@ var EASS_DEFAULT = 'https://eass.eassiitgn.page';
 
 function blankCloud(){
   return { server:EASS_DEFAULT, token:'', user:null, reportId:'', version:0,
-           lastSaved:'', lastError:'', dirty:false, autosave:true };
+           lastSaved:'', lastError:'', dirty:false, autosave:true, offlineChosen:false };
 }
 function cloudState(){
   if (!S.cloud) S.cloud = blankCloud();
@@ -77,7 +77,9 @@ function cloudLogin(email, password){
 function cloudLogout(){
   var c = cloudState();
   c.token = ''; c.user = null; c.reportId = ''; c.version = 0; c.lastSaved = '';
-  save(); renderAll();
+  c.offlineChosen = false;     /* the door asks again next time */
+  save();
+  if (typeof gateShow === 'function') gateShow(); else renderAll();
 }
 
 /* What the list shows about a report without opening it. */
@@ -92,11 +94,34 @@ function cloudCard(){
   };
 }
 /* The draft as it stands, minus the cloud block itself - a report should
-   not carry somebody's session token into the database. */
+   not carry somebody's session token into the database - and minus which
+   screen is open, which belongs to the person reading, not to the report. */
+var CLOUD_SKIP = { cloud:1, active:1 };
 function cloudPayload(){
   var out = {};
-  Object.keys(S).forEach(function(k){ if (k !== 'cloud') out[k] = S[k]; });
+  Object.keys(S).forEach(function(k){ if (!CLOUD_SKIP[k]) out[k] = S[k]; });
   return out;
+}
+
+/* What the server already holds, as one string. Moving between screens is
+   a change to the draft but not to the report, and a version per click
+   would make the history unreadable. */
+var CLOUD_SIG = '';
+function cloudSig(){ try { return JSON.stringify(cloudPayload()); } catch (e){ return ''; } }
+
+/* Starting a fresh report should not sign anybody out: the session belongs
+   to the person, the report id belongs to the report. Take the session
+   before S is replaced, hand it back afterwards. */
+function cloudSession(){
+  var c = cloudState();
+  return { server:c.server, token:c.token, user:c.user, autosave:c.autosave, offlineChosen:c.offlineChosen };
+}
+function cloudNewReport(sess){
+  sess = sess || {};
+  S.cloud = { server:sess.server || EASS_DEFAULT, token:sess.token || '', user:sess.user || null,
+              autosave:sess.autosave !== false, offlineChosen:!!sess.offlineChosen,
+              reportId:'', version:0, lastSaved:'', lastError:'', dirty:false };
+  CLOUD_SIG = '';
 }
 
 function cloudSave(note){
@@ -113,6 +138,7 @@ function cloudSave(note){
     p = cloudFetch('/api/reports', { method:'POST', body:body });
   }
   return p.then(function(r){
+    CLOUD_SIG = JSON.stringify(body.state);
     c.reportId = r.id; c.version = r.version; c.dirty = false; c.lastError = '';
     c.lastSaved = new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
     save(); paintCloudStrip();
@@ -132,9 +158,11 @@ function cloudOpen(id){
   return cloudFetch('/api/reports/' + encodeURIComponent(id)).then(function(r){
     var keep = cloudState();
     var cloud = { server:keep.server, token:keep.token, user:keep.user, autosave:keep.autosave,
-                  reportId:r.id, version:r.version, lastSaved:'opened', lastError:'', dirty:false };
+                  offlineChosen:keep.offlineChosen, reportId:r.id, version:r.version,
+                  lastSaved:'opened', lastError:'', dirty:false };
     S = deepMerge(blankState(), r.state || {});
     S.cloud = cloud;
+    CLOUD_SIG = cloudSig();      /* just arrived from the server - nothing to push */
     if (typeof migrateState === 'function') migrateState();
     saveNow(); renderAll();
     return r;
@@ -158,6 +186,9 @@ function cloudTouch(){
   clearTimeout(CLOUD_T);
   CLOUD_T = setTimeout(function(){
     if (CLOUD_BUSY) { cloudTouch(); return; }
+    if (c.reportId && cloudSig() === CLOUD_SIG){
+      c.dirty = false; paintCloudStrip(); return;   /* nothing actually changed */
+    }
     CLOUD_BUSY = true;
     cloudSave('autosave').catch(function(){ /* the strip already says so */ })
       .then(function(){ CLOUD_BUSY = false; });
@@ -392,11 +423,34 @@ function cloudImport(u){
   }
 }
 
-/* Sending this report's own imports up, so the next person has them too. */
-function cloudPushUpload(app, filename, blobB64, summary){
+/* A file dropped into this report, kept on the server too, so the next
+   person has what was measured and not only what this report made of it.
+   Which app it came from is decided the way the importer decides it. */
+function cloudAppOf(name, log){
+  var t = (name + ' ' + (log || '')).toLowerCase();
+  if (/thermo/.test(t)) return 'thermox';
+  if (/a-?cmp|compressor/.test(t)) return 'acmp';
+  if (/fox|pcc|mcc|apfc/.test(t)) return 'fox';
+  if (/jet/.test(t)) return 'jeteff';
+  if (/pq|postman-pq|recording/.test(t)) return 'aipqa';
+  return 'other';
+}
+function cloudArchiveFile(file, summary){
   if (!signedIn()) return Promise.resolve(null);
-  return cloudFetch('/api/ingest', { method:'POST', body:{
-    app:app, company_name:(S.company && S.company.name) || '', filename:filename,
-    report_id:cloudState().reportId || null, blob_b64:blobB64, summary:summary || ''
-  } }).catch(function(){ return null; });   /* never let a copy-up break an import */
+  return new Promise(function(res){
+    var r = new FileReader();
+    r.onload = function(){
+      var s = String(r.result);
+      res(s.slice(s.indexOf(',') + 1));      /* data:...;base64,XXXX */
+    };
+    r.onerror = function(){ res(null); };
+    r.readAsDataURL(file);
+  }).then(function(b64){
+    if (!b64) return null;
+    return cloudFetch('/api/ingest', { method:'POST', body:{
+      app: cloudAppOf(file.name, summary), company_name:(S.company && S.company.name) || '',
+      filename:file.name, content_type:file.type || '', report_id:cloudState().reportId || null,
+      blob_b64:b64, summary:summary || ''
+    } });
+  }).catch(function(){ return null; });   /* never let the copy-up break an import */
 }

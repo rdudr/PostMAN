@@ -1034,6 +1034,10 @@ function importDrop(opts){
         try {
           var log = importAny(wb, f.name);
           lines.push(log.length ? ['ok', f.name + ': ' + log.join('; ')] : ['bad', f.name + ': nothing recognised (sheets: ' + Object.keys(wb.Sheets).join(', ') + ')']);
+          /* The file itself goes to the server as well, so the next person
+             has what was measured and not only what this report made of it.
+             It never blocks or fails the import. */
+          if (log.length && typeof cloudArchiveFile === 'function') cloudArchiveFile(f, log.join('; '));
         } catch (err){ lines.push(['bad', f.name + ': ' + err.message]); }
         next();
       }).catch(function(e){ lines.push(['bad', f.name + ': ' + e.message]); next(); });

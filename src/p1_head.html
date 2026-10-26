@@ -208,6 +208,15 @@ table.ed td.act{width:1%;padding:0 4px;text-align:center}
 .scaler{transform-origin:top left}
 #measure{position:absolute;left:-99999px;top:0;visibility:hidden}
 
+/* ---- the sign-in page, over everything until it is answered ---- */
+#gate{display:none}
+body.gated #gate{display:block;position:fixed;inset:0;z-index:100;background:var(--bg);
+  overflow:auto;padding:min(12vh,110px) 20px 40px}
+body.gated #top,body.gated #shell{display:none!important}
+#gate input{width:100%}
+#gate details>summary{list-style:none}
+#gate details>summary::-webkit-details-marker{display:none}
+
 /* ---- print ---- */
 @media print{
   @page{size:794px 1123px;margin:0}

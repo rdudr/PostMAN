@@ -21,6 +21,7 @@ sys.path.insert(0, ROOT)
 
 TMP = tempfile.mkdtemp(prefix="eass-smoke-")
 os.environ["DATABASE_URL"] = ""
+os.environ["DATA_DIR"] = TMP
 os.environ["SQLITE_PATH"] = os.path.join(TMP, "smoke.db")
 os.environ["SESSION_SECRET"] = "smoke-test-secret-smoke-test-secret"
 os.environ["BOOTSTRAP_ADMIN_EMAIL"] = "admin@iitgn.ac.in"
@@ -145,6 +146,31 @@ with TestClient(app) as c:
           c.post("/api/auth/login", json={"email": "rahul@iitgn.ac.in", "password": "new-engineer-pass"}).status_code == 200)
     check("the old one does not",
           c.post("/api/auth/login", json={"email": "rahul@iitgn.ac.in", "password": "engineer-pass-1"}).status_code == 401)
+
+    print("company profiles and the trail")
+    cos = c.get("/api/companies", headers=eng).json()
+    check("the report's company was kept on its own", any(x["name"] == "Shree Mahadev Silk Mills" for x in cos), cos)
+    check("with the reports counted against it", [x for x in cos if x["name"] == "Shree Mahadev Silk Mills"][0]["reports"] == 1)
+    r = c.post("/api/companies", headers=eng,
+               json={"name": "Shree Mahadev Silk Mills", "district": "Surat", "contact": "Mr Patel", "phone": "9876543210"})
+    check("a profile can be filled in", r.status_code == 200, r.text)
+    co = [x for x in c.get("/api/companies", headers=eng).json() if x["name"] == "Shree Mahadev Silk Mills"][0]
+    check("and it keeps what was typed", co["district"] == "Surat" and co["contact"] == "Mr Patel", co)
+
+    acts = c.get("/api/activity", headers=eng).json()
+    kinds = {a["action"] for a in acts}
+    check("the trail has the create, the open and the save", {"create", "open", "save"} <= kinds, kinds)
+    check("every line says who", all(a["who"] for a in acts), acts[:3])
+    check("the upload is in the trail too", "upload" in kinds, kinds)
+    one_report = c.get("/api/reports/%s/activity" % rid, headers=eng).json()
+    check("a report's own trail is just its own", all(a["report_id"] == rid for a in one_report), one_report[:2])
+
+    print("where the data lives")
+    from app import db as _db
+    check("there is an uploads folder", os.path.isdir(_db.UPLOAD_DIR), _db.UPLOAD_DIR)
+    files = os.listdir(_db.UPLOAD_DIR)
+    check("the workbook was written to it as a file", len(files) == 1, files)
+    check("the database is in the data folder", os.path.dirname(_db.SQLITE_PATH) == os.path.abspath(TMP))
 
 print()
 if FAILED:
