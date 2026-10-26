@@ -76,7 +76,7 @@ function gateShow(){
   box.appendChild(srv);
 
   box.appendChild(el('p','margin-top:18px;font-size:12px;color:var(--ink-3);',
-    'No account? An administrator makes one for you. Working offline keeps everything in this browser — you can sign in later and push the report up.'));
+    'One account for the team, made when the server was set up. Working offline keeps everything in this browser — you can sign in later and push the report up.'));
   host.appendChild(box);
   setTimeout(function(){ em.focus(); }, 60);
 }

@@ -31,9 +31,16 @@ copy .env.example .env      # then edit it: see below
 |---|---|
 | `SESSION_SECRET` | 40+ random characters. Changing it signs everybody out. |
 | `BOOTSTRAP_ADMIN_EMAIL` | `iea@iitgn.ac.in` |
-| `BOOTSTRAP_ADMIN_PASSWORD` | the first password; change it from inside PostMan afterwards |
+| `BOOTSTRAP_ADMIN_PASSWORD` | the password the team will sign in with |
 
-`.env` is gitignored and must stay that way.
+That is the one and only account — see step 3. It is created on first start
+and never overwritten afterwards, so changing these lines later does nothing;
+the password is changed from inside PostMan.
+
+`.env` is gitignored and must stay that way. A short password is worth
+avoiding here, because once step 2 is done anyone who knows the hostname can
+reach the sign-in page: the tunnel is open to the internet even though the
+machine is not.
 
 `install-task.ps1` registers **EASS-API** as a scheduled task that starts
 with Windows and restarts itself if it stops, then checks
@@ -64,11 +71,26 @@ stranger can reach that is worth guessing at.
 **After this step PostMan is usable by the whole team**, from
 `https://post-man-iota.vercel.app`, with the server address already built in.
 
-## 3. Add the team's accounts  *(5 minutes, in PostMan)*
+## 3. There is nothing to do here
 
-Sign in as the admin, open **Server & my reports**, and add one account per
-engineer. Their name is what the trail shows against every save, so use the
-name they go by. Everybody changes their own password on the same screen.
+One login is all this needs, and step 1 made it:
+
+```
+iea@iitgn.ac.in
+```
+
+That account is an admin, and the whole team signs in with it. Nothing in
+PostMan asks for a second account.
+
+Two consequences, so neither is a surprise later. The activity trail will
+show the same name against every line, so it tells you *when* something was
+opened or saved but not by whom. And a shared password is only as private as
+the people who know it — change it from **Server & my reports** whenever
+somebody leaves, which signs nobody else out.
+
+If the team ever does want a line per person, the server already does it: an
+admin adds accounts on that same screen, and the trail starts naming them.
+That is an option, not a step.
 
 ## 4. Back up the folder  *(10 minutes, once)*
 
@@ -125,7 +147,6 @@ already re-encodes them.
 
 ## 8. The small ones, when they are wanted
 
-- An admin screen listing every account, with a way to switch one off.
 - The finished PDF stored against its report, so a client copy can be
   re-sent without rebuilding it.
 - A company screen in PostMan — the profiles are already being collected on

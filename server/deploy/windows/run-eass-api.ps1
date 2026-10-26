@@ -13,8 +13,16 @@
 $ErrorActionPreference = "Stop"
 $here   = Split-Path -Parent $MyInvocation.MyCommand.Path          # ...\server\deploy\windows
 $server = Split-Path -Parent (Split-Path -Parent $here)            # ...\server
-$python = Join-Path (Split-Path -Parent $server) "venv\Scripts\python.exe"
-if (-not (Test-Path $python)) { $python = "python" }               # fall back to whatever is on PATH
+# The virtual environment, wherever it was made: server\.venv is what the
+# instructions say, server\venv and one at the repository root are what people
+# actually type. Failing all three, whatever python is on PATH.
+$python = @(
+    (Join-Path $server ".venv\Scripts\python.exe"),
+    (Join-Path $server "venv\Scripts\python.exe"),
+    (Join-Path (Split-Path -Parent $server) ".venv\Scripts\python.exe"),
+    (Join-Path (Split-Path -Parent $server) "venv\Scripts\python.exe")
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $python) { $python = "python" }
 
 # .env, one KEY=value a line. Quotes are optional; # starts a comment.
 $envFile = Join-Path $server ".env"
