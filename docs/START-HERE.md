@@ -12,13 +12,27 @@ onward are code, and the code is already written for 1–5.
 
 ## 1. Start the server on the IITGN machine  *(you — 20 minutes)*
 
-The machine is `C:\Users\risha\Desktop\AI-Server-Remote-Access`, the one the
-Cloudflare tunnel already runs on. The campus firewall is not in the way:
-the tunnel dials **out**, so nothing has to be opened. We proved it — the
-tunnel's own `api.eassiitgn.page` answers from outside already.
+> Every command for steps 1, 2 and 4, written out for that machine with
+> something to check after each one, is in
+> [`server/deploy/windows/SERVER-SETUP.md`](../server/deploy/windows/SERVER-SETUP.md).
+> Follow that page while you are on the server; this page is the overview.
+
+The machine is `DESKTOP-UH3VCQ5`, reached with `2-SSH-Terminal.bat` or
+`1-Remote-Desktop.bat` in the `AI-Server-Remote-Access` folder on your
+desktop. It is the machine the Cloudflare tunnel already runs on, and that
+matters: the tunnel can only forward to something on its own localhost, so
+the server has to run *there*, not on your laptop.
+
+The campus firewall is not in the way: the tunnel dials **out**, so nothing
+has to be opened. We proved it — the tunnel's own `api.eassiitgn.page`
+answers from outside already.
+
+In short, on the server:
 
 ```powershell
-cd "C:\Users\risha\Desktop\process\The PostMan\server"
+cd C:\Users\Admin\Desktop
+git clone https://github.com/rdudr/PostMAN.git PostMan
+cd PostMan\server
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
 copy .env.example .env      # then edit it: see below
@@ -105,11 +119,13 @@ KISEM Project\
   logs\
 ```
 
-A backup is a copy of that folder. Schedule a nightly task that copies
-`eass.db` into `backups\` with the date in the name and keeps thirty; the
-command is in [`server/README.md`](../server/README.md#backups). Copy the
-whole folder to a drive weekly as well, because `uploads\` is the part that
-cannot be reconstructed.
+A backup is a copy of that folder, and there is a script for the database
+half: `scripts/backup.py`, scheduled at 2 am. Use it rather than copying
+`eass.db` - the database runs in WAL mode, so a plain file copy of a running
+database is missing the most recent work. The scheduling command is in
+[`SERVER-SETUP.md`](../server/deploy/windows/SERVER-SETUP.md#9-two-things-to-finish-properly).
+Copy the whole folder to a separate drive weekly as well, because `uploads\`
+is the part that cannot be reconstructed.
 
 ## 5. Use it on a real assessment  *(the next site visit)*
 

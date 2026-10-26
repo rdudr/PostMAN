@@ -193,7 +193,21 @@ Add the rest of the team from the API (`POST /api/users`) or with
 
 ## Backups
 
-The whole of the work is one database. A nightly dump, kept off the machine:
+On the Windows machine, `scripts/backup.py` - SQLite's online backup API, so
+the snapshot is consistent even while somebody is saving, which a file copy
+of a WAL-mode database is not:
+
+```powershell
+.\.venv\Scripts\python scripts\backup.py --keep 30
+```
+
+Scheduling it at 2 am is in
+[`deploy/windows/SERVER-SETUP.md`](deploy/windows/SERVER-SETUP.md). The
+database is the small half; `uploads\` is the half that cannot be
+reconstructed, so copy the whole `KISEM Project` folder off the machine every
+week or two as well.
+
+On PostgreSQL, a nightly dump instead:
 
 ```bash
 # /etc/cron.daily/eass-backup  (chmod +x)
