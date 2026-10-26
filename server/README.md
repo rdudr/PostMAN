@@ -68,7 +68,51 @@ form. What *is* relational is everything you search or join on: who owns a
 report, which company and year it belongs to, who saved which version, which
 app file fed it. Those are columns, indexed.
 
-## Putting it on Oracle Cloud
+## Where it runs: the team's own machine, through the tunnel
+
+The server is the AI machine at IITGN (`DESKTOP-UH3VCQ5`), published at
+`https://eass.eassiitgn.page` by the **Cloudflare tunnel that already runs on
+it**. That tunnel is how `https://api.eassiitgn.page/docs` answers today from
+a machine with no public address, and it is the whole answer to the campus
+firewall: cloudflared dials **out** to Cloudflare and traffic comes back down
+that connection. Nothing has to be allowed in, no port forwarding, no static
+IP, no conversation with the network office.
+
+The report tool itself stays on Vercel. The page and the API are then on
+different addresses, so the API has to name the page in `ALLOWED_ORIGINS` -
+that is the one setting people forget.
+
+### Putting it there
+
+1. **Copy the code** to the server (SSH is already set up:
+   `ssh ssh.eassiitgn.page`). Clone or pull `rdudr/PostMAN` to, say,
+   `C:\eassepo`, make a virtual environment beside it and install
+   `server/requirements.txt`. On SQLite - the default - `psycopg` is not
+   needed and can be skipped.
+2. **Settings:** copy `server/.env.example` to `server/.env`. Leave
+   `DATABASE_URL` blank (one SQLite file, one thing to back up), put a long
+   random `SESSION_SECRET` in, set `ALLOWED_ORIGINS` to the PostMan
+   addresses, and set the bootstrap admin email and password.
+3. **Run it at startup:** in an administrator PowerShell,
+   `deploy\windows\install-task.ps1`. It registers the `EASS-API`
+   scheduled task **at startup** (not at logon - a power cut must not need
+   somebody to sign in), restarts it if it dies, and checks
+   `http://127.0.0.1:8800/api/health` before it finishes.
+4. **Publish it:** `deploy\windows\cloudflared-ingress.md` - two lines in
+   the tunnel config and one `cloudflared tunnel route dns` command.
+5. **Sign in** from PostMan on Vercel, then remove the two `BOOTSTRAP_ADMIN_*`
+   lines and restart the task.
+
+### What to watch
+
+| | |
+|---|---|
+| **The machine must be awake** | A desktop that sleeps takes the server with it. Set the power plan to never sleep, and check `EASS-API` and `cloudflared` are both "At startup" - `server-side\harden-server.ps1` in the remote-access folder already does most of this. |
+| **Backups** | The whole of the work is `server\eass.db`. Copy it nightly somewhere else - Task Scheduler, one line: `Copy-Item C:\eassepo\server\eass.db D:ackups\eass-$(Get-Date -f yyyy-MM-dd).db`. A desktop under a table is not a backup strategy. |
+| **The front door is public** | Anyone who knows the hostname can reach `/api/auth/login`. Accounts are real (scrypt, expiring tokens), but add a Cloudflare rate-limiting rule on that path. |
+| **Request size** | Cloudflare's free plan caps a request at 100 MB. A report carries its photographs and bill scans inside the document, so a heavy one will approach that eventually; that is when assets move out of the document. |
+
+## If it ever moves to Oracle Cloud instead
 
 Four of these steps are yours — an account, a card for identity
 verification, a DNS record and a password — because they need your

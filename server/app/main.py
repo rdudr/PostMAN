@@ -23,7 +23,8 @@ from .security import SECRET, bootstrap_admin
 # offline against its own storage, which is what it is for.
 ALLOWED = [o.strip() for o in os.environ.get(
     "ALLOWED_ORIGINS",
-    "https://eassiitgn.arenergyservices.in,https://post-man-iota.vercel.app,http://127.0.0.1:4173,http://localhost:4173",
+    "https://post-man-iota.vercel.app,https://post-man-rdudrs-projects.vercel.app,"
+    "https://eass.eassiitgn.page,http://127.0.0.1:4173,http://localhost:4173",
 ).split(",") if o.strip()]
 
 app = FastAPI(title="EASS API", version="1.0.0", docs_url="/api/docs", openapi_url="/api/openapi.json")

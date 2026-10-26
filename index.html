@@ -9543,9 +9543,13 @@ function inboxCard(){
    Until now a report lived in one browser on one machine. That is fine for
    an evening's work and wrong for an assessment: nobody else can open it,
    a cleared cache takes it, and the version an engineer e-mails is the only
-   one anybody has. This connects the editor to the EASS server
-   (https://eassiitgn.arenergyservices.in) so a report is saved, listed,
-   versioned and reopened anywhere, by anyone on the team.
+   one anybody has. This connects the editor to the EASS server so a report
+   is saved, listed, versioned and reopened anywhere, by anyone on the team.
+
+   The server is the team's own machine at IITGN, published through the
+   Cloudflare tunnel that already runs on it. The tunnel dials OUT, so the
+   campus firewall needs no hole and the machine needs no public address -
+   which is why this works where a plain server would not.
 
    The rule that makes it safe to use on site: THE BROWSER IS STILL THE
    SOURCE OF TRUTH WHILE YOU ARE WORKING. Every keystroke saves to local
@@ -9559,7 +9563,7 @@ function inboxCard(){
    and the engineer chooses: reload theirs, or keep mine as a copy.
    =================================================================== */
 
-var EASS_DEFAULT = 'https://eassiitgn.arenergyservices.in';
+var EASS_DEFAULT = 'https://eass.eassiitgn.page';
 
 function blankCloud(){
   return { server:EASS_DEFAULT, token:'', user:null, reportId:'', version:0,
@@ -9734,7 +9738,7 @@ FORMS.cloud = function(w){
   var urlRow = el('div','display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;');
   var url = el('input'); url.type = 'text'; url.value = c.server; url.placeholder = EASS_DEFAULT;
   url.addEventListener('input', function(){ c.server = url.value.trim(); save(); });
-  var f = labelled('Server address', url, 'The KISEM server for IIT Gandhinagar. Change it only to test against another one.');
+  var f = labelled('Server address', url, 'The KISEM server at IIT Gandhinagar, reached through its Cloudflare tunnel. Change it only to test against another one.');
   f.style.flex = '1 1 280px'; urlRow.appendChild(f);
   c1.appendChild(urlRow);
 
