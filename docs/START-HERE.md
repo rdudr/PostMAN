@@ -159,6 +159,9 @@ already re-encodes them.
 | What you see | What it is |
 |---|---|
 | `525` from `eass.eassiitgn.page` | step 2 is not done — the name exists, nothing is behind it |
+| "Cannot reach the server at `https://eass.eassiitgn.page`" on the sign-in screen | the same thing, seen from inside PostMan. Until step 2 is done that address answers nothing. Work offline, or put a reachable address in the **Server address** box |
+| "Cannot reach the server" with a local address in the box | an `https://` copy of PostMan cannot call `http://127.0.0.1` — the browser refuses it. Serve PostMan locally too, or finish step 2 |
+| The API runs but the tunnel still 525s | the API has to run **on the machine the tunnel runs on**. One on your own laptop is not reachable through it |
 | "Working in this browser only" | not signed in; the report is safe in this browser |
 | "not saved — Failed to fetch" | the machine or the tunnel is down. Keep working; it retries |
 | "somebody else has saved since" | exactly that. Reload theirs, or keep yours as a copy |

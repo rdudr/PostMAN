@@ -1,5 +1,11 @@
 # Publishing the EASS API through the tunnel that is already running
 
+> **This is done on the AI server, not on your own machine.** The tunnel runs
+> there and can only forward to something on *its* own localhost. An EASS API
+> running on your laptop is unreachable through it, however correct the
+> ingress rule is. Check you are in the right place: `$env:COMPUTERNAME`
+> should be the AI server, and `Get-Process cloudflared` should find it.
+
 The AI server already reaches the world through a Cloudflare tunnel — that is
 how `https://api.eassiitgn.page/docs` answers from a machine with no public
 address and no hole in IITGN's firewall. The tunnel dials **out** to
@@ -42,8 +48,9 @@ curl https://eass.eassiitgn.page/api/health
 # {"ok":true,"engine":"sqlite","users":1,"reports":0}
 ```
 
-Then open PostMan on Vercel → **Server & my reports**, and the address is
-already `https://eass.eassiitgn.page`.
+Then open PostMan on Vercel and sign in: the address in the sign-in screen's
+**Server address** box is already `https://eass.eassiitgn.page`, so there is
+nothing to type.
 
 ## Two things to get right
 
@@ -57,6 +64,14 @@ ALLOWED_ORIGINS=https://post-man-iota.vercel.app,https://post-man-rdudrs-project
 
 A missing entry shows up as "Cannot reach the server" in the strip and a CORS
 line in the browser console — the API itself is fine.
+
+**An https page cannot call a plain-http local address.** PostMan on Vercel
+is `https://`, so pointing its **Server address** at `http://127.0.0.1:8800`
+fails - the browser stops the call before it is made, and the screen says
+"Cannot reach the server", which looks identical to the server being down.
+Pair them properly: the Vercel copy with the `https://` tunnel address, or a
+copy served locally (`python -m http.server 4173` in the repository, then
+`http://127.0.0.1:4173/index.html`) with `http://127.0.0.1:8800`.
 
 **The front door is public.** Anyone who knows the hostname can reach
 `/api/auth/login`. The accounts are real accounts — scrypt hashes, tokens
