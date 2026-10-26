@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
+PyJWT>=2.8
+# PostgreSQL on the server; development on SQLite needs neither of these.
+psycopg[binary]>=3.1
+psycopg_pool>=3.2

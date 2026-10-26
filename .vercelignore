@@ -1,0 +1,5 @@
+# Vercel serves this repository as static files. The server is not part of
+# the page and must not be downloadable from it.
+server/
+docs/
+src/

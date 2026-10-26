@@ -60,6 +60,9 @@ button,select,input,textarea{font:inherit;color:inherit}
 .brand i{font-style:normal;color:var(--brand)}
 .meta{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);
   text-transform:uppercase;letter-spacing:.06em}
+/* Where the work is kept, said once, at the top, always. */
+.cloudstrip{display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;
+  font-family:inherit;font-size:11.5px}
 #top .right{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .btn{padding:6px 12px;font-size:12.5px;border-radius:6px;cursor:pointer;
   border:1px solid var(--line);background:var(--panel);color:var(--ink)}
@@ -254,6 +257,7 @@ table.ed td.act{width:1%;padding:0 4px;text-align:center}
   <button class="btn ghost sm" id="navtoggle" style="display:none">Sections</button>
   <span class="brand">Post<i>Man</i></span>
   <span class="meta" id="reportline"></span>
+  <span class="meta cloudstrip" id="cloudstrip"></span>
   <div id="viewtabs" role="tablist">
     <button class="vtab" role="tab" data-view="work" aria-selected="true">Edit</button>
     <button class="vtab" role="tab" data-view="preview" aria-selected="false">Report</button>
@@ -485,6 +489,7 @@ function blankState(){
     pq:blankPq(),
     thermox:blankThermox(),
     acmpUpload:null,
+    cloud:blankCloud(),
     tr:{ make:'', capacity:null, primaryV:null, secondaryV:null, impedance:null,
          noLoadLoss:null, loadLoss:null, oilQty:'', year:'', srNo:'',
          meterUnits:null, loading:null, stdEff:null, actualEff:null,
@@ -581,6 +586,8 @@ function saveNow(){
 function save(){
   clearTimeout(saveT);
   saveT = setTimeout(saveNow, 250);
+  /* The browser is still the source of truth; the server copy follows it. */
+  if (typeof cloudTouch === 'function') cloudTouch();
 }
 /* A tab closed or reloaded inside the debounce window would lose the last
    quarter-second of typing; flush it on the way out. */
@@ -734,6 +741,7 @@ var SECTIONS = [
 
   { id:'custom',      group:'Closing', title:'Your own pages',   always:true },
   { id:'instruments', group:'Closing', title:'Instruments used', always:true },
+  { id:'cloud',       group:'Closing', title:'Server & my reports', always:true, tool:true },
   { id:'sources',     group:'Closing', title:'Data sources',       always:true, tool:true },
   { id:'imports',     group:'Closing', title:'Import field data', always:true, tool:true },
   { id:'costs',       group:'Closing', title:'Cost register',     always:true, tool:true }
@@ -9530,6 +9538,406 @@ function inboxCard(){
 
 
 /* ===================================================================
+   THE SERVER - where the work is kept.
+
+   Until now a report lived in one browser on one machine. That is fine for
+   an evening's work and wrong for an assessment: nobody else can open it,
+   a cleared cache takes it, and the version an engineer e-mails is the only
+   one anybody has. This connects the editor to the EASS server
+   (https://eassiitgn.arenergyservices.in) so a report is saved, listed,
+   versioned and reopened anywhere, by anyone on the team.
+
+   The rule that makes it safe to use on site: THE BROWSER IS STILL THE
+   SOURCE OF TRUTH WHILE YOU ARE WORKING. Every keystroke saves to local
+   storage exactly as before; the server is a copy that is pushed when there
+   is a connection and a signed-in person. Pull the network cable in a plant
+   basement and nothing stops - the cloud strip says "not saved since 14:02"
+   and keeps trying.
+
+   Conflicts are not resolved silently. The editor saves the version it
+   opened; if somebody else has saved since, the server refuses and says so,
+   and the engineer chooses: reload theirs, or keep mine as a copy.
+   =================================================================== */
+
+var EASS_DEFAULT = 'https://eassiitgn.arenergyservices.in';
+
+function blankCloud(){
+  return { server:EASS_DEFAULT, token:'', user:null, reportId:'', version:0,
+           lastSaved:'', lastError:'', dirty:false, autosave:true };
+}
+function cloudState(){
+  if (!S.cloud) S.cloud = blankCloud();
+  if (!S.cloud.server) S.cloud.server = EASS_DEFAULT;
+  return S.cloud;
+}
+function cloudUrl(path){ return String(cloudState().server || EASS_DEFAULT).replace(/\/+$/, '') + path; }
+function signedIn(){ var c = cloudState(); return !!(c.token && c.user); }
+
+/* One door to the API: the token goes on every call, an expired session is
+   reported in words rather than as a 401 in the console, and a server that
+   is simply not there says so without blaming the engineer. */
+function cloudFetch(path, opts){
+  opts = opts || {};
+  var c = cloudState();
+  var headers = { 'Content-Type':'application/json' };
+  if (c.token) headers.Authorization = 'Bearer ' + c.token;
+  return fetch(cloudUrl(path), {
+    method: opts.method || 'GET',
+    headers: headers,
+    body: opts.body === undefined ? undefined : JSON.stringify(opts.body)
+  }).then(function(r){
+    if (r.status === 401){
+      c.token = ''; c.user = null; save();
+      return r.json().catch(function(){ return {}; }).then(function(j){
+        throw new Error(j.detail || 'Your session has ended \u2014 sign in again.');
+      });
+    }
+    if (!r.ok) return r.json().catch(function(){ return {}; }).then(function(j){
+      var e = new Error(j.detail || (r.status + ' ' + r.statusText)); e.status = r.status; throw e;
+    });
+    return r.status === 204 ? null : r.json();
+  }, function(){
+    throw new Error('Cannot reach the server at ' + cloudState().server + '. Your work is safe in this browser; it will go up when the connection is back.');
+  });
+}
+
+function cloudLogin(email, password){
+  return cloudFetch('/api/auth/login', { method:'POST', body:{ email:email, password:password } })
+    .then(function(r){
+      var c = cloudState();
+      c.token = r.token; c.user = r.user; c.lastError = '';
+      save(); return r.user;
+    });
+}
+function cloudLogout(){
+  var c = cloudState();
+  c.token = ''; c.user = null; c.reportId = ''; c.version = 0; c.lastSaved = '';
+  save(); renderAll();
+}
+
+/* What the list shows about a report without opening it. */
+function cloudCard(){
+  var co = (S.company && S.company.name) || '';
+  return {
+    title: (TYPES[S.meta.reportType] || 'Energy Assessment') + (co ? ' \u2014 ' + co : ''),
+    company_name: co,
+    financial_year: S.meta.financialYear || '',
+    serial: num(S.meta.serial) || 1,
+    report_no: reportNumber(S.meta.financialYear, S.meta.serial) + ' ' + (S.meta.revision || '')
+  };
+}
+/* The draft as it stands, minus the cloud block itself - a report should
+   not carry somebody's session token into the database. */
+function cloudPayload(){
+  var out = {};
+  Object.keys(S).forEach(function(k){ if (k !== 'cloud') out[k] = S[k]; });
+  return out;
+}
+
+function cloudSave(note){
+  var c = cloudState();
+  if (!signedIn()) return Promise.reject(new Error('Sign in first.'));
+  var body = cloudCard();
+  body.state = cloudPayload();
+  body.note = note || '';
+  var p;
+  if (c.reportId){
+    body.version = c.version;
+    p = cloudFetch('/api/reports/' + encodeURIComponent(c.reportId), { method:'PUT', body:body });
+  } else {
+    p = cloudFetch('/api/reports', { method:'POST', body:body });
+  }
+  return p.then(function(r){
+    c.reportId = r.id; c.version = r.version; c.dirty = false; c.lastError = '';
+    c.lastSaved = new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
+    save(); paintCloudStrip();
+    return r;
+  }).catch(function(e){
+    c.lastError = e.message; save(); paintCloudStrip();
+    throw e;
+  });
+}
+/* Keeping mine when somebody else has saved: a new report, not an argument. */
+function cloudSaveAsCopy(){
+  var c = cloudState();
+  c.reportId = ''; c.version = 0;
+  return cloudSave('copy kept after a clash');
+}
+function cloudOpen(id){
+  return cloudFetch('/api/reports/' + encodeURIComponent(id)).then(function(r){
+    var keep = cloudState();
+    var cloud = { server:keep.server, token:keep.token, user:keep.user, autosave:keep.autosave,
+                  reportId:r.id, version:r.version, lastSaved:'opened', lastError:'', dirty:false };
+    S = deepMerge(blankState(), r.state || {});
+    S.cloud = cloud;
+    if (typeof migrateState === 'function') migrateState();
+    saveNow(); renderAll();
+    return r;
+  });
+}
+function cloudReports(archived){
+  return cloudFetch('/api/reports' + (archived ? '?archived=true' : ''));
+}
+
+/* ------------------------------------------------------------------
+   AUTOSAVE - debounced, and only ever from a screen the engineer is
+   already working in. Nothing is pushed while a sign-in is missing or a
+   save is already in flight.
+   ------------------------------------------------------------------ */
+var CLOUD_T = null, CLOUD_BUSY = false;
+function cloudTouch(){
+  var c = cloudState();
+  if (!signedIn() || !c.autosave) return;
+  c.dirty = true;
+  paintCloudStrip();
+  clearTimeout(CLOUD_T);
+  CLOUD_T = setTimeout(function(){
+    if (CLOUD_BUSY) { cloudTouch(); return; }
+    CLOUD_BUSY = true;
+    cloudSave('autosave').catch(function(){ /* the strip already says so */ })
+      .then(function(){ CLOUD_BUSY = false; });
+  }, 4000);
+}
+
+/* The one line at the top of the editor that says where the work is. */
+function paintCloudStrip(){
+  var host = q('cloudstrip'); if (!host) return;
+  clear(host);
+  var c = cloudState();
+  if (!signedIn()){
+    host.appendChild(el('span','', 'Working in this browser only'));
+    var inb = btn('Connect to the server', function(){ S.active = 'cloud'; save(); renderAll(); }, 'sm');
+    host.appendChild(inb);
+    return;
+  }
+  var where = c.reportId ? (c.lastError ? 'not saved \u2014 ' + c.lastError
+                            : c.dirty ? 'saving\u2026'
+                            : 'saved ' + (c.lastSaved || '') + ' \u00B7 v' + c.version)
+                         : 'not on the server yet';
+  host.appendChild(el('span','', (c.user.name || c.user.email) + ' \u00B7 ' + where));
+  if (c.lastError) host.firstChild.style.color = 'var(--bad)';
+  host.appendChild(btn(c.reportId ? 'Save now' : 'Save to the server', function(){
+    cloudSave('manual save').then(function(){ paintCloudStrip(); })
+      .catch(function(e){ alert(e.message); });
+  }, 'sm primary'));
+  host.appendChild(btn('My reports', function(){ S.active = 'cloud'; save(); renderAll(); }, 'sm'));
+}
+
+/* ------------------------------------------------------------------
+   THE SCREEN
+   ------------------------------------------------------------------ */
+FORMS.cloud = function(w){
+  var c = cloudState();
+
+  var c1 = card('The KISEM server',
+    'Reports live here instead of in one browser: anyone on the team can open one, every save keeps the one before it, and the field apps send their files to the same place. Your work is still kept in this browser as you type \u2014 the server is the copy that outlives the laptop.');
+  var urlRow = el('div','display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;');
+  var url = el('input'); url.type = 'text'; url.value = c.server; url.placeholder = EASS_DEFAULT;
+  url.addEventListener('input', function(){ c.server = url.value.trim(); save(); });
+  var f = labelled('Server address', url, 'The KISEM server for IIT Gandhinagar. Change it only to test against another one.');
+  f.style.flex = '1 1 280px'; urlRow.appendChild(f);
+  c1.appendChild(urlRow);
+
+  if (!signedIn()){
+    var form = el('div','display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px;');
+    var em = el('input'); em.type = 'email'; em.placeholder = 'you@iitgn.ac.in'; em.autocomplete = 'username';
+    var pw = el('input'); pw.type = 'password'; pw.placeholder = 'password'; pw.autocomplete = 'current-password';
+    form.appendChild(labelled('Email', em));
+    form.appendChild(labelled('Password', pw));
+    c1.appendChild(form);
+    var msg = el('p',''); msg.className = 'callout'; msg.hidden = true;
+    var go = function(){
+      msg.hidden = false; msg.className = 'callout'; msg.textContent = 'Signing in\u2026';
+      cloudLogin(em.value.trim(), pw.value).then(function(){ renderAll(); })
+        .catch(function(e){ msg.className = 'callout bad'; msg.textContent = e.message; });
+    };
+    pw.addEventListener('keydown', function(e){ if (e.key === 'Enter') go(); });
+    c1.appendChild(btn('Sign in', go, 'primary'));
+    c1.appendChild(msg);
+    c1.appendChild(el('p','margin-top:8px;font-size:12px;color:var(--ink-3);',
+      'No account? An administrator makes one for you \u2014 accounts are not self-service, because a report carries a client\u2019s measurements.'));
+    w.appendChild(c1);
+    return;
+  }
+
+  c1.appendChild(el('p','margin-top:8px;', 'Signed in as ' + (c.user.name || c.user.email) + ' (' + c.user.role + ').')).className = 'callout good';
+  var bar = el('div','display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;');
+  bar.appendChild(fCheck(c, 'autosave', 'Save to the server as I work'));
+  bar.appendChild(btn('Sign out', cloudLogout, 'sm'));
+  c1.appendChild(bar);
+  w.appendChild(c1);
+
+  /* --- this report --- */
+  var c2 = card('This report', c.reportId
+    ? 'It is on the server. Every save keeps the one before it, so a figure changed by mistake is recoverable.'
+    : 'This draft is only in this browser. Put it on the server and the team can open it.');
+  var k = el('div'); k.className = 'kpis';
+  [['Report', cloudCard().report_no || '\u2014'], ['Company', cloudCard().company_name || '\u2014'],
+   ['Version', c.reportId ? String(c.version) : 'not saved'], ['Last save', c.lastSaved || '\u2014']].forEach(function(p){
+    var x = el('div'); x.className = 'kpi';
+    x.appendChild(el('span','', p[0])).className = 'k';
+    x.appendChild(el('span','', p[1])).className = 'v';
+    k.appendChild(x);
+  });
+  c2.appendChild(k);
+  if (c.lastError) c2.appendChild(el('p','', c.lastError)).className = 'callout bad';
+  var bar2 = el('div','display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;');
+  bar2.appendChild(btn(c.reportId ? 'Save now' : 'Save to the server', function(){
+    cloudSave('manual save').then(function(){ renderAll(); }).catch(function(e){
+      /* A clash is the one error worth stopping for: two people, one report. */
+      if (/moved on/.test(e.message) && confirm(e.message + '\n\nKeep yours as a separate report?')){
+        cloudSaveAsCopy().then(function(){ renderAll(); }).catch(function(e2){ alert(e2.message); });
+      } else alert(e.message);
+    });
+  }, 'primary'));
+  if (c.reportId){
+    bar2.appendChild(btn('Reload the server\u2019s copy', function(){
+      if (!confirm('Replace this draft with the copy on the server?\n\nAnything you have changed since the last save is lost.')) return;
+      cloudOpen(c.reportId).catch(function(e){ alert(e.message); });
+    }));
+    bar2.appendChild(btn('Save as a new report', function(){
+      cloudSaveAsCopy().then(function(){ renderAll(); }).catch(function(e){ alert(e.message); });
+    }));
+    bar2.appendChild(btn('Detach from the server', function(){
+      c.reportId = ''; c.version = 0; c.lastSaved = ''; save(); renderAll();
+    }));
+  }
+  c2.appendChild(bar2);
+  w.appendChild(c2);
+
+  /* --- the versions behind this report --- */
+  if (c.reportId){
+    var cv = card('Earlier saves', 'Every save of this report, newest first. Open one to look at it \u2014 it becomes your draft, and the one on the server is untouched until you save again.');
+    var vlist = el('div','margin-top:6px;');
+    cv.appendChild(vlist);
+    cv.appendChild(btn('Show the saves', function(){
+      clear(vlist); vlist.appendChild(el('p','', 'Asking the server\u2026'));
+      cloudFetch('/api/reports/' + encodeURIComponent(c.reportId) + '/versions').then(function(vs){
+        clear(vlist);
+        if (!vs.length){ vlist.appendChild(el('p','', 'No saves yet.')); return; }
+        vs.forEach(function(v){
+          var row = el('div','display:flex;gap:10px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line-2);');
+          row.appendChild(el('span','font-family:\'IBM Plex Mono\',monospace;min-width:48px;', 'v' + v.version));
+          row.appendChild(el('span','flex:1 1 auto;font-size:12.5px;', (v.note || '\u2014') + ' \u00B7 ' + v.saved_at + (v.saved_by ? ' \u00B7 ' + v.saved_by : '')));
+          row.appendChild(btn('Open', function(){
+            if (!confirm('Open version ' + v.version + ' as your draft?\n\nYour current draft is replaced; the server keeps every version either way.')) return;
+            cloudFetch('/api/reports/' + encodeURIComponent(c.reportId) + '/versions/' + v.version).then(function(r){
+              var keep = cloudState();
+              var cloud = { server:keep.server, token:keep.token, user:keep.user, autosave:false,
+                            reportId:keep.reportId, version:keep.version, lastSaved:'', lastError:'', dirty:true };
+              S = deepMerge(blankState(), r.state || {});
+              S.cloud = cloud;
+              saveNow(); renderAll();
+              alert('Version ' + v.version + ' is now your draft, and saving to the server is paused so it cannot overwrite the newer one by accident. Turn it back on when you mean to.');
+            }).catch(function(e){ alert(e.message); });
+          }, 'sm'));
+          vlist.appendChild(row);
+        });
+      }).catch(function(e){ clear(vlist); vlist.appendChild(el('p','', e.message)).className = 'callout bad'; });
+    }));
+    w.appendChild(cv);
+  }
+
+  /* --- everything on the server --- */
+  var c3 = card('Reports on the server', 'Every report the team has saved. Opening one replaces the draft in this browser.');
+  var list = el('div','margin-top:6px;');
+  var load = function(archived){
+    clear(list); list.appendChild(el('p','', 'Asking the server\u2026'));
+    cloudReports(archived).then(function(rows){
+      clear(list);
+      if (!rows.length){ list.appendChild(el('p','', archived ? 'Nothing archived.' : 'No reports on the server yet. Save this one to start.')); return; }
+      rows.forEach(function(r){
+        var row = el('div','display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--line-2);');
+        var main = el('div','flex:1 1 260px;min-width:0;');
+        main.appendChild(el('strong','display:block;font-size:13px;', r.company_name || r.title || 'Untitled'));
+        main.appendChild(el('span','font-size:11.5px;color:var(--ink-3);',
+          [r.report_no, r.financial_year, 'v' + r.version, r.updated_at, r.updated_by].filter(Boolean).join(' \u00B7 ')));
+        row.appendChild(main);
+        if (r.id === c.reportId) row.appendChild(el('span','font-size:11px;color:var(--ok);', 'open here'));
+        row.appendChild(btn('Open', function(){
+          if (c.dirty && !confirm('Open ' + (r.company_name || 'that report') + '?\n\nThis draft has changes that are not on the server yet; they are replaced.')) return;
+          cloudOpen(r.id).catch(function(e){ alert(e.message); });
+        }, 'sm'));
+        row.appendChild(btn(archived ? 'Restore' : 'Archive', function(){
+          var p = archived ? cloudFetch('/api/reports/' + r.id + '/restore', { method:'POST' })
+                           : cloudFetch('/api/reports/' + r.id, { method:'DELETE' });
+          p.then(function(){ load(archived); }).catch(function(e){ alert(e.message); });
+        }, 'sm'));
+        list.appendChild(row);
+      });
+    }).catch(function(e){ clear(list); list.appendChild(el('p','', e.message)).className = 'callout bad'; });
+  };
+  var bar3 = el('div','display:flex;gap:8px;flex-wrap:wrap;');
+  bar3.appendChild(btn('Show the reports', function(){ load(false); }, 'primary'));
+  bar3.appendChild(btn('Show archived', function(){ load(true); }));
+  c3.appendChild(bar3);
+  c3.appendChild(list);
+  w.appendChild(c3);
+
+  /* --- what the apps have sent --- */
+  var c4 = card('Files the field apps have sent',
+    'FOX KISEM, Thermo-X, JET-Eff, A-CMP and the PQ analyser can post their exports straight to the server. Anything sent for this company can be imported from here without a file ever touching a laptop.');
+  var ul = el('div','margin-top:6px;');
+  c4.appendChild(btn('Show files for ' + ((S.company && S.company.name) || 'this company'), function(){
+    clear(ul); ul.appendChild(el('p','', 'Asking the server\u2026'));
+    cloudFetch('/api/ingest?company=' + encodeURIComponent((S.company && S.company.name) || '')).then(function(rows){
+      clear(ul);
+      if (!rows.length){ ul.appendChild(el('p','', 'Nothing sent for this company yet.')); return; }
+      rows.forEach(function(r){
+        var row = el('div','display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:5px 0;border-bottom:1px solid var(--line-2);');
+        var m = el('div','flex:1 1 240px;min-width:0;');
+        m.appendChild(el('strong','display:block;font-size:12.5px;', (r.app || '').toUpperCase() + ' \u00B7 ' + (r.filename || r.summary || r.id.slice(0, 8))));
+        m.appendChild(el('span','font-size:11px;color:var(--ink-3);', [r.summary, r.uploaded_at, r.uploaded_by].filter(Boolean).join(' \u00B7 ')));
+        row.appendChild(m);
+        row.appendChild(btn('Import', function(){
+          cloudFetch('/api/ingest/' + r.id).then(function(u){ cloudImport(u); }).catch(function(e){ alert(e.message); });
+        }, 'sm'));
+        ul.appendChild(row);
+      });
+    }).catch(function(e){ clear(ul); ul.appendChild(el('p','', e.message)).className = 'callout bad'; });
+  }, 'primary'));
+  c4.appendChild(ul);
+  c4.appendChild(importLogBox());
+  w.appendChild(c4);
+};
+
+/* A file from the server goes through the very importer a dropped file goes
+   through - the server is a delivery van, not a second format. */
+function cloudImport(u){
+  var lines = [];
+  try {
+    if (u.payload && typeof importPqBundle === 'function' && isPqBundle(u.payload)){
+      lines.push(importPqBundle(u.payload, u.filename || u.app));
+    } else if (u.blob_b64){
+      var bin = atob(u.blob_b64), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var wb = XLSX.read(bytes, { type:'array' });
+      lines = lines.concat(importAny(wb, u.filename || (u.app + '.xlsx')));
+    } else {
+      throw new Error('That upload carries nothing this report can read.');
+    }
+    save(); renderAll();
+    var box = document.getElementById('importlog');
+    if (box){
+      clear(box); box.hidden = false;
+      lines.forEach(function(l){ var p = el('div','', l); p.className = 'callout good'; p.style.margin = '0 0 4px'; box.appendChild(p); });
+    }
+  } catch (e){
+    alert(e.message);
+  }
+}
+
+/* Sending this report's own imports up, so the next person has them too. */
+function cloudPushUpload(app, filename, blobB64, summary){
+  if (!signedIn()) return Promise.resolve(null);
+  return cloudFetch('/api/ingest', { method:'POST', body:{
+    app:app, company_name:(S.company && S.company.name) || '', filename:filename,
+    report_id:cloudState().reportId || null, blob_b64:blobB64, summary:summary || ''
+  } }).catch(function(){ return null; });   /* never let a copy-up break an import */
+}
+
+
+/* ===================================================================
    CUSTOM PAGES AND THE TABLE OF CONTENTS
 
    Two things a generated report cannot do without.
@@ -11694,6 +12102,7 @@ function drawPreview(){
 
 function renderAll(){
   renderNav();
+  if (typeof paintCloudStrip === 'function') paintCloudStrip();
   document.body.classList.toggle('verify-mode', S.active === 'verify');
   var w = q('work');
   clear(w);

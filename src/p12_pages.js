@@ -432,6 +432,7 @@ function drawPreview(){
 
 function renderAll(){
   renderNav();
+  if (typeof paintCloudStrip === 'function') paintCloudStrip();
   document.body.classList.toggle('verify-mode', S.active === 'verify');
   var w = q('work');
   clear(w);

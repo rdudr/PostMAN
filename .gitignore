@@ -27,3 +27,11 @@ PUSH.md
 APPLY.md
 *.cmd
 *.zip
+
+# The development database and any .env - the server keeps its own on the box.
+server/*.db
+server/*.db-shm
+server/*.db-wal
+server/.env
+__pycache__/
+*.pyc

@@ -1,0 +1,25 @@
+# /etc/systemd/system/eass-api.service
+# systemctl daemon-reload && systemctl enable --now eass-api
+[Unit]
+Description=EASS API (KISEM energy assessment server)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=eass
+Group=eass
+WorkingDirectory=/opt/eass/server
+EnvironmentFile=/opt/eass/server/.env
+ExecStart=/opt/eass/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8800 --workers 2
+Restart=always
+RestartSec=3
+# The service needs nothing outside its own directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/eass/server
+
+[Install]
+WantedBy=multi-user.target

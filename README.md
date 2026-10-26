@@ -16,6 +16,18 @@ The same file is served online as `index.html` (repository
 https://github.com/rdudr/PostMAN, deployed by Vercel on every push). Both are
 built from the parts in `src/` by `python src/build.py`.
 
+## Where the work is kept
+
+Every keystroke is saved in the browser, as it always was, and the tool runs
+with no network at all. Beside that there is now a server — **Server & my
+reports** in the Closing group — at
+`https://eassiitgn.arenergyservices.in`: sign in and the report is saved
+there too, listed for the whole team, with every earlier save kept. Two
+people on one report do not overwrite each other; the second save is refused
+and the editor offers to reload or to keep yours as a separate report. The
+server, its API and how to put it on Oracle Cloud are in
+[`server/README.md`](server/README.md).
+
 ## What it needs from the internet
 
 Nothing, to run. It will reach out for three optional things:

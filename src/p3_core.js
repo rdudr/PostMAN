@@ -185,6 +185,7 @@ function blankState(){
     pq:blankPq(),
     thermox:blankThermox(),
     acmpUpload:null,
+    cloud:blankCloud(),
     tr:{ make:'', capacity:null, primaryV:null, secondaryV:null, impedance:null,
          noLoadLoss:null, loadLoss:null, oilQty:'', year:'', srNo:'',
          meterUnits:null, loading:null, stdEff:null, actualEff:null,
@@ -281,6 +282,8 @@ function saveNow(){
 function save(){
   clearTimeout(saveT);
   saveT = setTimeout(saveNow, 250);
+  /* The browser is still the source of truth; the server copy follows it. */
+  if (typeof cloudTouch === 'function') cloudTouch();
 }
 /* A tab closed or reloaded inside the debounce window would lose the last
    quarter-second of typing; flush it on the way out. */
