@@ -18,7 +18,7 @@ parser to keep in step and nothing new to break when a column is added.
 
 An app that does not send yet is not broken: PostMan still opens it with
 the plant named, and the engineer exports and drops the file as before.
-PostMan's own origin is `https://post-man-iota.vercel.app`.
+PostMan's own origin is `https://postman-ten-beta.vercel.app`.
 
 Addresses live in PostMan's state, not in its code — **Data sources → Web
 address**. Redeploying an app to a different URL is a field edit.
@@ -32,7 +32,7 @@ parameters:
 
 ```
 ?from=postman
-&origin=https://post-man-iota.vercel.app   the window to send back to
+&origin=https://postman-ten-beta.vercel.app   the window to send back to
 &company=Shree%20Mahadev%20Silk%20Mills%20Pvt.%20Ltd.
 &fy=2025-26
 ```
@@ -52,8 +52,8 @@ Opened normally, the app behaves exactly as it does today.
    that opened us. PostMan reads it with its ordinary importer. */
 
 const POSTMAN_ORIGINS = [
-  'https://post-man-iota.vercel.app',           // production
-  'https://post-man-rdudrs-projects.vercel.app',// the team alias
+  'https://postman-ten-beta.vercel.app',           // production
+  'https://postman-rdudrs-projects.vercel.app',// the team alias
   'http://localhost:8801'                       // local testing
 ];
 

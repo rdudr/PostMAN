@@ -59,7 +59,7 @@ browser checks who is allowed to call it. `ALLOWED_ORIGINS` in `.env` must
 list the PostMan addresses exactly, scheme and all:
 
 ```
-ALLOWED_ORIGINS=https://post-man-iota.vercel.app,https://post-man-rdudrs-projects.vercel.app,http://127.0.0.1:4173
+ALLOWED_ORIGINS=https://postman-ten-beta.vercel.app,https://postman-rdudrs-projects.vercel.app,https://postman-git-main-rdudrs-projects.vercel.app,http://127.0.0.1:4173
 ```
 
 A missing entry shows up as "Cannot reach the server" in the strip and a CORS

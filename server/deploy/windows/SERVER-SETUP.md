@@ -228,7 +228,7 @@ curl https://eass.eassiitgn.page/api/health
 ```
 
 A JSON answer means it is done. Open PostMan at
-`https://post-man-iota.vercel.app` and sign in — the **Server address** box
+`https://postman-ten-beta.vercel.app` and sign in — the **Server address** box
 already says `https://eass.eassiitgn.page`, so there is nothing to type.
 
 If this is where it fails, go to the table at the bottom.

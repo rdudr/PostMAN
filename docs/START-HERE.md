@@ -83,7 +83,7 @@ While you are in the Cloudflare dashboard, add one rate-limit rule on
 stranger can reach that is worth guessing at.
 
 **After this step PostMan is usable by the whole team**, from
-`https://post-man-iota.vercel.app`, with the server address already built in.
+`https://postman-ten-beta.vercel.app`, with the server address already built in.
 
 ## 3. There is nothing to do here
 

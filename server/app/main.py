@@ -23,7 +23,7 @@ from .security import SECRET, bootstrap_admin
 # offline against its own storage, which is what it is for.
 ALLOWED = [o.strip() for o in os.environ.get(
     "ALLOWED_ORIGINS",
-    "https://post-man-iota.vercel.app,https://post-man-rdudrs-projects.vercel.app,"
+    "https://postman-ten-beta.vercel.app,https://postman-rdudrs-projects.vercel.app,https://postman-git-main-rdudrs-projects.vercel.app,"
     "https://eass.eassiitgn.page,http://127.0.0.1:4173,http://localhost:4173",
 ).split(",") if o.strip()]
 
