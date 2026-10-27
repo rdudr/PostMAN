@@ -69,6 +69,16 @@ with TestClient(app) as c:
     check("an engineer cannot add accounts",
           c.post("/api/users", headers=eng, json={"email": "x@y.z", "name": "x", "password": "12345678"}).status_code == 403)
 
+    print("staying signed in")
+    r = c.post("/api/auth/refresh", headers=eng)
+    check("a live session can swap its token for a fresh one", r.status_code == 200, r.text)
+    fresh = {"Authorization": "Bearer " + r.json()["token"]}
+    check("the fresh token works", c.get("/api/auth/me", headers=fresh).status_code == 200)
+    check("and still says who it is", c.get("/api/auth/me", headers=fresh).json()["email"] == "rahul@iitgn.ac.in")
+    check("a refresh without a token is refused", c.post("/api/auth/refresh").status_code == 401)
+    check("a refresh with a bad token is refused",
+          c.post("/api/auth/refresh", headers={"Authorization": "Bearer not-a-token"}).status_code == 401)
+
     print("reports")
     state = {"meta": {"financialYear": "2026-27", "serial": 1}, "company": {"name": "Shree Mahadev Silk Mills"},
              "bills": [{"month": "Jun 26", "kwh": 486500}]}
@@ -101,6 +111,31 @@ with TestClient(app) as c:
     check("both versions are listed", len(versions) == 2, versions)
     old = c.get("/api/reports/%s/versions/1" % rid, headers=eng).json()
     check("an old version can be read back", len(old["state"]["bills"]) == 1)
+
+    print("telling my own last save from somebody else's")
+    # The editor sends a mark with every push. On the next load it reads the
+    # mark back: its own means "my save landed, take the version number",
+    # anybody else's means "two people have this open".
+    v2 = c.get("/api/reports/" + rid, headers=eng).json()["version"]
+    r = c.put("/api/reports/" + rid, headers=eng,
+              json={"title": "t", "company_name": "Shree Mahadev Silk Mills", "financial_year": "2026-27",
+                    "serial": 1, "report_no": "x", "state": state2, "version": v2,
+                    "note": "left the page", "client_mark": "mark-abc-123"})
+    check("a push may carry a mark", r.status_code == 200, r.text)
+    got = c.get("/api/reports/" + rid, headers=eng).json()
+    check("and the mark comes back with the report", got["client_mark"] == "mark-abc-123", got.get("client_mark"))
+    r = c.put("/api/reports/" + rid, headers=eng,
+              json={"title": "t", "company_name": "Shree Mahadev Silk Mills", "financial_year": "2026-27",
+                    "serial": 1, "report_no": "x", "state": state2, "version": got["version"],
+                    "note": "somebody else", "client_mark": "mark-xyz-999"})
+    check("a later save replaces the mark", r.status_code == 200, r.text)
+    check("so the old mark is no longer the newest",
+          c.get("/api/reports/" + rid, headers=eng).json()["client_mark"] == "mark-xyz-999")
+    check("a read with quiet=true does not add an opening to the trail",
+          c.get("/api/reports/%s?quiet=true" % rid, headers=eng).status_code == 200)
+    quiet_opens = [a for a in c.get("/api/reports/%s/activity" % rid, headers=eng).json()
+                   if a["action"] == "open" and "version %d" % c.get("/api/reports/" + rid, headers=eng).json()["version"] in a["detail"]]
+    check("quiet really is quiet", len(quiet_opens) <= 1, quiet_opens)
 
     cards = c.get("/api/reports", headers=eng).json()
     check("the report is in the list", any(x["id"] == rid for x in cards))

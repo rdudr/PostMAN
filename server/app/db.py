@@ -253,9 +253,30 @@ DDL = [
 ]
 
 
+def columns(table: str) -> set[str]:
+    """What this table actually has, so a new column can be added to a
+    database that already exists without a migration framework."""
+    if IS_PG:
+        return {r[0] for r in many(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = %s", (table,))}
+    return {r[1] for r in many("PRAGMA table_info(%s)" % table)}
+
+
+def add_column(table: str, name: str, decl: str) -> None:
+    """One nullable column, added once. Nullable and with no default is the
+    only shape that is safe to add to a table somebody is already using."""
+    if name not in columns(table):
+        run("ALTER TABLE %s ADD COLUMN %s %s" % (table, name, decl))
+
+
 def init_db() -> None:
     for stmt in DDL:
         run(stmt)
+    # Which client save produced the version now stored. The editor sends a
+    # mark with every push; on the next load it can then tell its own last
+    # save from somebody else's, which is the difference between "carry on"
+    # and "two people have edited this".
+    add_column("reports", "client_mark", "TEXT")
 
 
 def trail(user, action: str, report_id: str | None = None, subject: str = "", detail: str = "") -> None:

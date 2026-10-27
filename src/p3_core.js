@@ -289,9 +289,37 @@ function save(){
   /* The browser is still the source of truth; the server copy follows it. */
   if (typeof cloudTouch === 'function') cloudTouch();
 }
-/* A tab closed or reloaded inside the debounce window would lose the last
-   quarter-second of typing; flush it on the way out. */
-window.addEventListener('beforeunload', function(){ if (saveT) saveNow(); });
+/* Leaving the page - closed, reloaded, or just switched away from on a
+   phone. Two things happen, in this order and for different reasons:
+
+     the local write is flushed, because a tab closed inside the
+     quarter-second debounce would otherwise lose the last of the typing;
+
+     and the server is offered whatever it has not got yet, as a keepalive
+     request that outlives the page.
+
+   visibilitychange is the event browsers actually honour on the way out;
+   pagehide covers the rest. Both are best effort, and neither is relied
+   upon: anything outstanding goes up on the next open regardless. */
+function flushOnLeave(){
+  if (saveT) saveNow();
+  if (typeof cloudFlushOnLeave === 'function') cloudFlushOnLeave();
+}
+document.addEventListener('visibilitychange', function(){
+  if (document.visibilityState === 'hidden') flushOnLeave();
+});
+window.addEventListener('pagehide', flushOnLeave);
+window.addEventListener('beforeunload', function(e){
+  flushOnLeave();
+  /* Only ever warn when the server really is behind AND there is a session
+     to put it on. A draft that is only ever local is not "unsaved" - that
+     is how the tool is allowed to be used. */
+  if (typeof cloudBehind === 'function' && cloudBehind()){
+    e.preventDefault();
+    e.returnValue = '';          /* the browser shows its own wording */
+    return '';
+  }
+});
 
 /* ---- images. Alpha is preserved end to end; the stored asset is always
    PNG-32, never flattened, so one file works on the white cover and on a

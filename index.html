@@ -603,9 +603,37 @@ function save(){
   /* The browser is still the source of truth; the server copy follows it. */
   if (typeof cloudTouch === 'function') cloudTouch();
 }
-/* A tab closed or reloaded inside the debounce window would lose the last
-   quarter-second of typing; flush it on the way out. */
-window.addEventListener('beforeunload', function(){ if (saveT) saveNow(); });
+/* Leaving the page - closed, reloaded, or just switched away from on a
+   phone. Two things happen, in this order and for different reasons:
+
+     the local write is flushed, because a tab closed inside the
+     quarter-second debounce would otherwise lose the last of the typing;
+
+     and the server is offered whatever it has not got yet, as a keepalive
+     request that outlives the page.
+
+   visibilitychange is the event browsers actually honour on the way out;
+   pagehide covers the rest. Both are best effort, and neither is relied
+   upon: anything outstanding goes up on the next open regardless. */
+function flushOnLeave(){
+  if (saveT) saveNow();
+  if (typeof cloudFlushOnLeave === 'function') cloudFlushOnLeave();
+}
+document.addEventListener('visibilitychange', function(){
+  if (document.visibilityState === 'hidden') flushOnLeave();
+});
+window.addEventListener('pagehide', flushOnLeave);
+window.addEventListener('beforeunload', function(e){
+  flushOnLeave();
+  /* Only ever warn when the server really is behind AND there is a session
+     to put it on. A draft that is only ever local is not "unsaved" - that
+     is how the tool is allowed to be used. */
+  if (typeof cloudBehind === 'function' && cloudBehind()){
+    e.preventDefault();
+    e.returnValue = '';          /* the browser shows its own wording */
+    return '';
+  }
+});
 
 /* ---- images. Alpha is preserved end to end; the stored asset is always
    PNG-32, never flattened, so one file works on the white cover and on a
@@ -9545,14 +9573,37 @@ function inboxCard(){
    Conflicts are not resolved silently. The editor saves the version it
    opened; if somebody else has saved since, the server refuses and says so,
    and the engineer chooses: reload theirs, or keep mine as a copy.
+
+   FOUR RULES KEEP WORK FROM BEING LOST, and between them there is no gap:
+
+     1. Every change is written to this browser at once. That write is
+        synchronous and local, so it cannot fail for want of a network.
+     2. While you work, the server is kept a couple of seconds behind. A
+        push that fails is retried on a backoff - 5s, 10s, 20s, 40s, then
+        every minute - rather than waiting for the next keystroke.
+     3. Closing the tab, or just leaving it, pushes what is outstanding there
+        and then, as a keepalive request that outlives the page. A typical
+        report is 25 KB, so this normally completes.
+     4. Whatever rule 3 could not finish goes up the moment the app next
+        opens, before anything else. This is the guarantee the other three
+        lean on: a browser being closed cannot be relied upon, so nothing
+        depends on it alone.
+
+   And the session: a stored sign-in is believed at once and checked against
+   the server a moment later. A server that cannot be reached leaves you
+   signed in - a blip in a plant basement is not a reason to log somebody
+   out - while a definite "that token is no longer valid" returns you to the
+   door, with the reason given and the draft untouched.
    =================================================================== */
 
 var EASS_DEFAULT = 'https://eass.eassiitgn.page';
 
 function blankCloud(){
-  return { server:EASS_DEFAULT, token:'', user:null, reportId:'', version:0,
-           lastSaved:'', lastError:'', dirty:false, autosave:true, offlineChosen:false };
+  return { server:EASS_DEFAULT, token:'', user:null, tokenAt:0, reportId:'', version:0,
+           lastMark:'', lastSaved:'', lastError:'', dirty:false, autosave:true, offlineChosen:false };
 }
+/* How long a token lasts on the server; renewed once past half of it. */
+var TOKEN_LIFE_MS = 12 * 3600 * 1000;
 function cloudState(){
   if (!S.cloud) S.cloud = blankCloud();
   if (!S.cloud.server) S.cloud.server = EASS_DEFAULT;
@@ -9575,9 +9626,13 @@ function cloudFetch(path, opts){
     body: opts.body === undefined ? undefined : JSON.stringify(opts.body)
   }).then(function(r){
     if (r.status === 401){
-      c.token = ''; c.user = null; save();
+      /* The token is gone or expired. Ending a session is one function, so
+         that it always does the same things wherever the 401 surfaced:
+         forget the token, keep the draft, remember why, show the door. */
       return r.json().catch(function(){ return {}; }).then(function(j){
-        throw new Error(j.detail || 'Your session has ended \u2014 sign in again.');
+        var why = j.detail || 'Your session has ended.';
+        cloudEndSession(why);
+        throw new Error(why + ' Your work is safe in this browser.');
       });
     }
     if (!r.ok) return r.json().catch(function(){ return {}; }).then(function(j){
@@ -9593,16 +9648,144 @@ function cloudLogin(email, password){
   return cloudFetch('/api/auth/login', { method:'POST', body:{ email:email, password:password } })
     .then(function(r){
       var c = cloudState();
-      c.token = r.token; c.user = r.user; c.lastError = '';
-      save(); return r.user;
+      c.token = r.token; c.user = r.user; c.tokenAt = Date.now();
+      c.lastError = ''; CLOUD_FAILS = 0; CLOUD_CONFLICT = '';
+      saveNow();
+      /* Whatever this browser holds and the server does not, goes up now. */
+      cloudPush('signed in');
+      return r.user;
     });
 }
+
+/* Ending a session, from wherever, always means the same four things: the
+   token is forgotten, THE DRAFT IS NOT TOUCHED, the reason is kept so it can
+   be shown at the door, and the door comes back. Nothing here deletes work,
+   and the report binding is kept so signing back in carries on with the same
+   report rather than making a duplicate of it. */
+function cloudEndSession(why){
+  var c = cloudState();
+  c.token = ''; c.user = null; c.tokenAt = 0;
+  c.lastError = why || '';
+  c.offlineChosen = false;             /* so the door asks again */
+  clearTimeout(CLOUD_T); CLOUD_T = null;
+  saveNow();
+  if (typeof gateShow === 'function') gateShow(why || ''); else renderAll();
+}
+
+/* Signing out on purpose. Work that is not on the server yet is offered up
+   first: leaving it behind should be a decision somebody makes knowingly,
+   not a side effect of clicking Sign out. */
 function cloudLogout(){
   var c = cloudState();
-  c.token = ''; c.user = null; c.reportId = ''; c.version = 0; c.lastSaved = '';
-  c.offlineChosen = false;     /* the door asks again next time */
-  save();
-  if (typeof gateShow === 'function') gateShow(); else renderAll();
+  var behind = c.reportId ? (c.dirty || cloudSig() !== CLOUD_SIG) : cloudAnyWork();
+  if (!behind){ cloudEndSession(''); return Promise.resolve(); }
+  if (!confirm('Sign out?\n\nThis report has changes that are not on the server yet.\n\nOK \u2014 put them on the server, then sign out.\nCancel \u2014 stay signed in.'))
+    return Promise.resolve();
+  return cloudSave('saved on sign-out').then(function(){ cloudEndSession(''); })
+    .catch(function(e){
+      if (confirm('That did not save: ' + e.message + '\n\nSign out anyway? The work stays in this browser and goes up the next time you sign in.'))
+        cloudEndSession('');
+    });
+}
+/* Is there anything here worth keeping at all? Asked before nagging about a
+   draft that is really just an empty form. */
+function cloudAnyWork(){
+  return !!((S.company && S.company.name) || (S.bills && S.bills.length) || (S.ledger && S.ledger.length));
+}
+
+/* ------------------------------------------------------------------
+   PICKING UP WHERE YOU LEFT OFF
+
+   Run once at boot when a token is already in this browser. The token is
+   BELIEVED immediately - the app opens signed in, with no spinner and no
+   flash of the sign-in page - and checked against the server a moment
+   later, which is when a stale one is caught.
+   ------------------------------------------------------------------ */
+function cloudResume(){
+  var c = cloudState();
+  if (!signedIn()) return Promise.resolve(false);
+  return cloudFetch('/api/auth/me').then(function(u){
+    c.user = u;                        /* a renamed account shows its new name */
+    c.lastError = '';
+    return cloudRenewIfStale();
+  }).then(function(){
+    paintCloudStrip();
+    return cloudReconcile();           /* rule 4: catch the server up, first thing */
+  }).then(function(){
+    return true;
+  }).catch(function(e){
+    /* A 401 has already shown the door, through cloudEndSession. Anything
+       else is the server being unreachable, which is NOT a reason to sign
+       anybody out: stay in, say so in the strip, and look again in a minute. */
+    if (signedIn()){
+      c.lastError = e.message;
+      paintCloudStrip();
+      setTimeout(cloudResume, 60000);
+    }
+    return false;
+  });
+}
+
+/* ---- rule 4: settling up with the server on the way in ---------------
+
+   The one thing a reload cannot know is whether the push made as the page
+   closed actually landed. Guessing from version numbers is not good enough:
+   if that push DID land, the server is a version ahead of what this browser
+   remembers, which looks exactly like somebody else having saved.
+
+   So compare the content, not the counter. Three outcomes, and only one of
+   them is a clash worth interrupting anybody for.                        */
+function cloudCanon(v){
+  /* Key order must not decide whether two reports are "different": the
+     server hands back what Python's json made of what we sent. */
+  if (v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+  if (Array.isArray(v)) return '[' + v.map(cloudCanon).join(',') + ']';
+  return '{' + Object.keys(v).sort().map(function(k){
+    return JSON.stringify(k) + ':' + cloudCanon(v[k]);
+  }).join(',') + '}';
+}
+
+function cloudReconcile(){
+  var c = cloudState();
+  if (!signedIn() || !c.reportId) return cloudPush('first save after signing in');
+  return cloudFetch('/api/reports/' + encodeURIComponent(c.reportId) + '?quiet=true').then(function(r){
+    var ours = !!(r.client_mark && c.lastMark && r.client_mark === c.lastMark);
+
+    /* The newest save on the server is one WE made - almost always the one
+       sent as the page closed. Take its version number; there is no clash
+       here and nobody needs telling about it. */
+    if (ours || r.version === c.version){
+      c.version = r.version;
+      c.dirty = false; c.lastError = ''; CLOUD_FAILS = 0;
+      CLOUD_SIG = cloudCanon(r.state || {}) === cloudCanon(cloudPayload()) ? cloudSig() : '';
+      saveNow(); paintCloudStrip();
+      /* Anything this browser has on top of that - work done after the
+         flush, or a field a migration filled in on the way in - goes up
+         now. CLOUD_SIG was left empty above precisely so this is not
+         mistaken for "no change". */
+      return CLOUD_SIG ? false : cloudPush('caught up after a reload', true);
+    }
+
+    /* Somebody else's save is the newest one. Do not touch it. */
+    CLOUD_CONFLICT = 'This report has moved on since you last had it \u2014 the server is on version ' +
+      r.version + ' and you were on ' + c.version + '.';
+    clearTimeout(CLOUD_T); CLOUD_T = null;
+    paintCloudStrip();
+    return false;
+  });
+}
+
+/* A token half-way through its life is replaced, so a long day on site does
+   not end in a sign-out nobody asked for. */
+function cloudRenewIfStale(){
+  var c = cloudState();
+  if (!signedIn()) return Promise.resolve(false);
+  var age = Date.now() - (c.tokenAt || 0);
+  if (c.tokenAt && age < TOKEN_LIFE_MS / 2) return Promise.resolve(false);
+  return cloudFetch('/api/auth/refresh', { method:'POST' }).then(function(r){
+    c.token = r.token; c.user = r.user || c.user; c.tokenAt = Date.now();
+    saveNow(); return true;
+  }).catch(function(){ return false; });   /* the current token still works */
 }
 
 /* What the list shows about a report without opening it. */
@@ -9637,14 +9820,47 @@ function cloudSig(){ try { return JSON.stringify(cloudPayload()); } catch (e){ r
    before S is replaced, hand it back afterwards. */
 function cloudSession(){
   var c = cloudState();
-  return { server:c.server, token:c.token, user:c.user, autosave:c.autosave, offlineChosen:c.offlineChosen };
+  return { server:c.server, token:c.token, user:c.user, tokenAt:c.tokenAt,
+           autosave:c.autosave, offlineChosen:c.offlineChosen };
 }
 function cloudNewReport(sess){
   sess = sess || {};
   S.cloud = { server:sess.server || EASS_DEFAULT, token:sess.token || '', user:sess.user || null,
-              autosave:sess.autosave !== false, offlineChosen:!!sess.offlineChosen,
+              tokenAt:sess.tokenAt || 0, autosave:sess.autosave !== false,
+              offlineChosen:!!sess.offlineChosen,
               reportId:'', version:0, lastSaved:'', lastError:'', dirty:false };
   CLOUD_SIG = '';
+  CLOUD_CONFLICT = ''; CLOUD_FAILS = 0;
+  clearTimeout(CLOUD_T); CLOUD_T = null;
+}
+
+/* A mark on every push, so that on the next load this editor can recognise
+   its OWN last save. Without it, a save made as the page closed leaves the
+   server one version ahead of what this browser remembers, which is
+   indistinguishable from a colleague having saved - and the editor would
+   cry conflict at somebody every time they pressed reload.
+
+   The mark is derived from the CONTENT being sent, not from the attempt.
+   That matters: leaving a page fires visibilitychange, pagehide and
+   beforeunload, so the same report can be sent two or three times on the
+   way out. A mark per attempt would leave the server holding one value and
+   the browser remembering another - which is the false clash this whole
+   mechanism exists to prevent. A mark per content is the same value however
+   many times it goes. */
+function cloudHash(str){
+  /* FNV-1a, 32 bits. The length goes on the end, which makes an accidental
+     match between two different reports not worth thinking about. */
+  var h = 0x811c9dc5;
+  for (var i = 0; i < str.length; i++){
+    h ^= str.charCodeAt(i);
+    h = (h + (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0;
+  }
+  return ('0000000' + h.toString(16)).slice(-8) + '-' + str.length;
+}
+function cloudMark(canon){
+  var c = cloudState();
+  c.lastMark = cloudHash(canon);
+  return c.lastMark;
 }
 
 function cloudSave(note){
@@ -9653,6 +9869,7 @@ function cloudSave(note){
   var body = cloudCard();
   body.state = cloudPayload();
   body.note = note || '';
+  body.client_mark = cloudMark(cloudCanon(body.state));
   var p;
   if (c.reportId){
     body.version = c.version;
@@ -9675,18 +9892,21 @@ function cloudSave(note){
 function cloudSaveAsCopy(){
   var c = cloudState();
   c.reportId = ''; c.version = 0;
+  CLOUD_CONFLICT = ''; CLOUD_FAILS = 0;
   return cloudSave('copy kept after a clash');
 }
 function cloudOpen(id){
   return cloudFetch('/api/reports/' + encodeURIComponent(id)).then(function(r){
     var keep = cloudState();
-    var cloud = { server:keep.server, token:keep.token, user:keep.user, autosave:keep.autosave,
-                  offlineChosen:keep.offlineChosen, reportId:r.id, version:r.version,
-                  lastSaved:'opened', lastError:'', dirty:false };
+    var cloud = { server:keep.server, token:keep.token, user:keep.user, tokenAt:keep.tokenAt,
+                  autosave:keep.autosave, offlineChosen:keep.offlineChosen,
+                  reportId:r.id, version:r.version, lastSaved:'opened', lastError:'', dirty:false };
     S = deepMerge(blankState(), r.state || {});
     S.cloud = cloud;
-    CLOUD_SIG = cloudSig();      /* just arrived from the server - nothing to push */
     if (typeof migrateState === 'function') migrateState();
+    CLOUD_SIG = cloudSig();      /* just arrived from the server - nothing to push */
+    CLOUD_CONFLICT = ''; CLOUD_FAILS = 0;
+    clearTimeout(CLOUD_T); CLOUD_T = null;
     saveNow(); renderAll();
     return r;
   });
@@ -9696,50 +9916,202 @@ function cloudReports(archived){
 }
 
 /* ------------------------------------------------------------------
-   AUTOSAVE - debounced, and only ever from a screen the engineer is
-   already working in. Nothing is pushed while a sign-in is missing or a
-   save is already in flight.
+   KEEPING THE SERVER CAUGHT UP
+
+   One timer, one push at a time, and a failure that retries itself. The
+   editor never waits for any of it: the browser already has the change
+   before this is even scheduled.
    ------------------------------------------------------------------ */
-var CLOUD_T = null, CLOUD_BUSY = false;
-function cloudTouch(){
-  var c = cloudState();
-  if (!signedIn() || !c.autosave) return;
-  c.dirty = true;
-  paintCloudStrip();
-  clearTimeout(CLOUD_T);
-  CLOUD_T = setTimeout(function(){
-    if (CLOUD_BUSY) { cloudTouch(); return; }
-    if (c.reportId && cloudSig() === CLOUD_SIG){
-      c.dirty = false; paintCloudStrip(); return;   /* nothing actually changed */
-    }
-    CLOUD_BUSY = true;
-    cloudSave('autosave').catch(function(){ /* the strip already says so */ })
-      .then(function(){ CLOUD_BUSY = false; });
-  }, 4000);
+var CLOUD_T = null;            /* the pending push */
+var CLOUD_BUSY = false;        /* one at a time, so two saves cannot race */
+var CLOUD_AGAIN = false;       /* something changed while one was in flight */
+var CLOUD_FAILS = 0;          /* consecutive failures, for the backoff */
+var CLOUD_CONFLICT = '';       /* set when the server says somebody else saved */
+var CLOUD_DELAY = 2500;        /* how far behind the server runs while typing */
+var CLOUD_FLUSHED = '';        /* the content already sent on the way out */
+
+/* How long to wait after a failure: 5s, 10s, 20s, 40s, then every minute. */
+function cloudBackoff(){
+  return Math.min(5000 * Math.pow(2, Math.max(0, CLOUD_FAILS - 1)), 60000);
 }
 
-/* The one line at the top of the editor that says where the work is. */
+/* Called by save() on every change. Cheap: it sets a flag and a timer. */
+function cloudTouch(){
+  var c = cloudState();
+  if (!signedIn() || !c.autosave || CLOUD_CONFLICT) return;
+  c.dirty = true;
+  paintCloudStrip();
+  cloudArm(CLOUD_DELAY);
+}
+function cloudArm(ms){
+  clearTimeout(CLOUD_T);
+  CLOUD_T = setTimeout(function(){ CLOUD_T = null; cloudPush('autosave'); }, ms);
+}
+
+/* The single place a push happens. Everything else asks this.
+   `force` is a person pressing Save: it goes even when saving-as-you-work
+   has been switched off, because they asked for this one. */
+function cloudPush(note, force){
+  var c = cloudState();
+  if (!signedIn() || CLOUD_CONFLICT) return Promise.resolve(false);
+  if (!c.autosave && !force) return Promise.resolve(false);
+  /* An empty form is not a report. Signing in used to put one on the server
+     every time, which filled the team's list with untitled nothings. Once a
+     report exists it is kept up to date whatever it contains - deleting the
+     company name is a change, not a reason to stop saving. */
+  if (!c.reportId && !cloudAnyWork()) return Promise.resolve(false);
+  if (CLOUD_BUSY){ CLOUD_AGAIN = true; return Promise.resolve(false); }
+  /* Nothing actually different from what the server holds: a screen change,
+     or a field typed into and typed back. Don't make a version for it. */
+  if (c.reportId && cloudSig() === CLOUD_SIG){
+    c.dirty = false; c.lastError = ''; CLOUD_FAILS = 0; paintCloudStrip();
+    return Promise.resolve(false);
+  }
+  CLOUD_BUSY = true;
+  return cloudSave(note || 'autosave').then(function(){
+    CLOUD_FAILS = 0;
+    return true;
+  }).catch(function(e){
+    if (e && e.status === 409){
+      /* Two people, one report. Retrying would fail for ever and bury the
+         choice, so autosaving stops here until somebody decides. */
+      CLOUD_CONFLICT = e.message;
+      clearTimeout(CLOUD_T); CLOUD_T = null;
+    } else if (signedIn()){
+      CLOUD_FAILS++;
+      cloudArm(cloudBackoff());        /* rule 2: try again by itself */
+    }
+    return false;
+  }).then(function(ok){
+    CLOUD_BUSY = false;
+    if (CLOUD_AGAIN){ CLOUD_AGAIN = false; cloudArm(ok ? CLOUD_DELAY : cloudBackoff()); }
+    paintCloudStrip();
+    return ok;
+  });
+}
+
+/* Somebody pressing Save, or Try now. Clears the wait and the failure count
+   first, so a backoff already running does not hold up a deliberate save,
+   and reports what happened rather than failing quietly. */
+function cloudRetryNow(){
+  var c = cloudState();
+  CLOUD_FAILS = 0;
+  clearTimeout(CLOUD_T); CLOUD_T = null;
+  var was = c.reportId ? 'manual save' : 'first save';
+  return cloudPush(was, true).then(function(ok){
+    if (!ok && c.lastError && !CLOUD_CONFLICT) alert(c.lastError);
+    return ok;
+  });
+}
+
+/* Is the server behind this browser? The one question worth asking before
+   warning somebody that they are about to lose something. */
+function cloudBehind(){
+  var c = cloudState();
+  if (!signedIn() || !c.autosave) return false;
+  if (!c.reportId) return cloudAnyWork();
+  return c.dirty || cloudSig() !== CLOUD_SIG;
+}
+
+/* ---- rule 3: leaving the page ----------------------------------------
+   visibilitychange fires when a tab is hidden, switched away from or
+   closed, and it is the last moment a browser reliably gives us. The
+   request is sent with keepalive so it survives the page going away.
+   It is best effort by nature, which is why rule 4 exists.            */
+function cloudFlushOnLeave(){
+  var c = cloudState();
+  if (!signedIn() || !c.autosave || CLOUD_CONFLICT) return;
+  if (!c.reportId && !cloudAnyWork()) return;         /* an empty form, never mind */
+  if (!c.dirty && cloudSig() === CLOUD_SIG) return;   /* already up there */
+  var body = cloudCard();
+  body.state = cloudPayload();
+  body.note = 'left the page';
+  body.client_mark = cloudMark(cloudCanon(body.state));
+  if (c.reportId) body.version = c.version;
+  /* Leaving fires three events; this content has already gone. */
+  if (CLOUD_FLUSHED === body.client_mark) return;
+  CLOUD_FLUSHED = body.client_mark;
+  /* The mark must be in local storage BEFORE the request goes, because the
+     page may not live long enough for anything after this to run. It is how
+     the next load recognises this save as its own. */
+  saveNow();
+  try {
+    fetch(cloudUrl(c.reportId ? '/api/reports/' + encodeURIComponent(c.reportId) : '/api/reports'), {
+      method: c.reportId ? 'PUT' : 'POST',
+      headers: { 'Content-Type':'application/json', Authorization:'Bearer ' + c.token },
+      body: JSON.stringify(body),
+      keepalive: true
+    });
+    /* No .then: the page is going. Whether it landed is settled on the next
+       open, when the signature is compared again and anything outstanding
+       is pushed. */
+  } catch (e){ /* nothing useful to do on the way out */ }
+}
+
+/* The one line at the top of the editor that says where the work is.
+
+   It never says "saved" when something is outstanding, and never leaves a
+   failure looking like success. Those two are the whole job: an engineer
+   should be able to glance at it and know whether they can close the lid. */
 function paintCloudStrip(){
   var host = q('cloudstrip'); if (!host) return;
   clear(host);
   var c = cloudState();
+
   if (!signedIn()){
     host.appendChild(el('span','', 'Working in this browser only'));
-    var inb = btn('Connect to the server', function(){ S.active = 'cloud'; save(); renderAll(); }, 'sm');
-    host.appendChild(inb);
+    host.appendChild(btn('Sign in', function(){
+      cloudState().offlineChosen = false; save();
+      if (typeof gateShow === 'function') gateShow();
+    }, 'sm'));
     return;
   }
-  var where = c.reportId ? (c.lastError ? 'not saved \u2014 ' + c.lastError
-                            : c.dirty ? 'saving\u2026'
-                            : 'saved ' + (c.lastSaved || '') + ' \u00B7 v' + c.version)
-                         : 'not on the server yet';
-  host.appendChild(el('span','', (c.user.name || c.user.email) + ' \u00B7 ' + where));
-  if (c.lastError) host.firstChild.style.color = 'var(--bad)';
-  host.appendChild(btn(c.reportId ? 'Save now' : 'Save to the server', function(){
-    cloudSave('manual save').then(function(){ paintCloudStrip(); })
-      .catch(function(e){ alert(e.message); });
-  }, 'sm primary'));
+
+  var who = c.user.name || c.user.email;
+  var line, tone = '';
+
+  if (CLOUD_CONFLICT){
+    line = 'somebody else has saved this report';
+    tone = 'var(--bad)';
+  } else if (!c.reportId){
+    line = 'not on the server yet';
+  } else if (CLOUD_BUSY){
+    line = 'saving\u2026';
+  } else if (c.lastError){
+    line = CLOUD_FAILS ? 'not saved \u2014 trying again' : 'not saved \u2014 ' + c.lastError;
+    tone = 'var(--bad)';
+  } else if (c.dirty){
+    line = 'saving\u2026';
+  } else {
+    line = 'saved ' + (c.lastSaved || '') + ' \u00B7 v' + c.version;
+  }
+  var label = el('span','', who + ' \u00B7 ' + line);
+  if (tone) label.style.color = tone;
+  host.appendChild(label);
+
+  if (CLOUD_CONFLICT){
+    host.appendChild(btn('What now?', function(){ S.active = 'cloud'; save(); renderAll(); }, 'sm primary'));
+    return;
+  }
+  if (c.lastError){
+    host.appendChild(btn('Try now', function(){ cloudRetryNow(); }, 'sm primary'));
+  } else {
+    host.appendChild(btn(c.reportId ? 'Save now' : 'Save to the server', function(){
+      cloudRetryNow();
+    }, 'sm primary'));
+  }
   host.appendChild(btn('My reports', function(){ S.active = 'cloud'; save(); renderAll(); }, 'sm'));
+}
+
+/* ---- the two ways out of a clash, in one place ---------------------- */
+function cloudTakeTheirs(){
+  var c = cloudState();
+  CLOUD_CONFLICT = '';
+  return cloudOpen(c.reportId);
+}
+function cloudKeepMine(){
+  CLOUD_CONFLICT = '';
+  return cloudSaveAsCopy();
 }
 
 /* ------------------------------------------------------------------
@@ -9799,15 +10171,33 @@ FORMS.cloud = function(w){
     k.appendChild(x);
   });
   c2.appendChild(k);
+
+  /* A clash is the one thing worth stopping the work for, so it is put
+     where the work is, with both answers side by side and neither of them
+     chosen for anybody. Saving to the server stays paused until one is. */
+  if (CLOUD_CONFLICT){
+    var cf = el('div','margin-top:10px;');
+    cf.appendChild(el('p','', CLOUD_CONFLICT)).className = 'callout bad';
+    cf.appendChild(el('p','font-size:12.5px;color:var(--ink-2);margin:6px 0 8px;',
+      'Nothing has been overwritten, and saving to the server is paused until you choose. Your version is still in this browser either way.'));
+    var cfb = el('div','display:flex;gap:8px;flex-wrap:wrap;');
+    cfb.appendChild(btn('Take theirs \u2014 replace my draft', function(){
+      if (!confirm('Replace this draft with the copy on the server?\n\nWhat you have changed since your last save is lost.')) return;
+      cloudTakeTheirs().catch(function(e){ alert(e.message); });
+    }, 'primary'));
+    cfb.appendChild(btn('Keep mine \u2014 save it as a new report', function(){
+      cloudKeepMine().then(function(){ renderAll(); }).catch(function(e){ alert(e.message); });
+    }));
+    cf.appendChild(cfb);
+    c2.appendChild(cf);
+    w.appendChild(c2);
+    return;        /* one decision at a time */
+  }
+
   if (c.lastError) c2.appendChild(el('p','', c.lastError)).className = 'callout bad';
   var bar2 = el('div','display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;');
   bar2.appendChild(btn(c.reportId ? 'Save now' : 'Save to the server', function(){
-    cloudSave('manual save').then(function(){ renderAll(); }).catch(function(e){
-      /* A clash is the one error worth stopping for: two people, one report. */
-      if (/moved on/.test(e.message) && confirm(e.message + '\n\nKeep yours as a separate report?')){
-        cloudSaveAsCopy().then(function(){ renderAll(); }).catch(function(e2){ alert(e2.message); });
-      } else alert(e.message);
-    });
+    cloudRetryNow().then(function(){ renderAll(); });
   }, 'primary'));
   if (c.reportId){
     bar2.appendChild(btn('Reload the server\u2019s copy', function(){
@@ -10007,7 +10397,7 @@ function gateDismiss(){
   document.body.classList.remove('gated');
   renderAll();
 }
-function gateShow(){
+function gateShow(why){
   document.body.classList.add('gated');
   var host = q('gate');
   clear(host);
@@ -10026,6 +10416,14 @@ function gateShow(){
   card1.appendChild(labelled('Email', em));
   card1.appendChild(labelled('Password', pw));
   var msg = el('p','margin-top:10px;'); msg.className = 'callout'; msg.hidden = true;
+  /* Why the door is being shown. A session that ran out says so, rather
+     than leaving somebody to wonder whether they typed the password wrong
+     last time. The draft is still in the browser, and saying that here is
+     the difference between a nuisance and a fright. */
+  if (why){
+    msg.hidden = false; msg.className = 'callout';
+    msg.textContent = why + (cloudAnyWork() ? ' Your report is still here \u2014 signing in puts it back on the server.' : '');
+  }
   var go = btn('Sign in', function(){
     if (!em.value.trim() || !pw.value){ msg.hidden = false; msg.className = 'callout bad'; msg.textContent = 'Email and password, please.'; return; }
     msg.hidden = false; msg.className = 'callout'; msg.textContent = 'Signing in\u2026';
@@ -10098,7 +10496,7 @@ FORMS.home = function(w){
   var bar = el('div','display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;');
   bar.appendChild(btn('Carry on with this report', function(){ S.active = 'cover'; save(); renderAll(); }, 'primary'));
   if (signedIn()) bar.appendChild(btn(c.reportId ? 'Save now' : 'Put it on the server', function(){
-    cloudSave('manual save').then(function(){ renderAll(); }).catch(function(e){ alert(e.message); });
+    cloudRetryNow().then(function(){ renderAll(); });
   }));
   bar.appendChild(btn('Start a new report', function(){
     if (!confirm('Start a new, empty report?\n\nThis draft is replaced in this browser' +
@@ -10106,10 +10504,6 @@ FORMS.home = function(w){
     var sess = cloudSession();
     S = blankState(); cloudNewReport(sess);
     S.active = 'cover'; saveNow(); renderAll();
-  }));
-  bar.appendChild(btn('Load the sample report', function(){
-    if (!confirm('Load the worked example?\n\nIt replaces this draft with a complete report \u2014 bills, baseline, utilities and recommendations \u2014 to look at and take apart.')) return;
-    var b = document.getElementById('demo'); if (b) b.click();
   }));
   head.appendChild(bar);
   w.appendChild(head);
@@ -10119,7 +10513,6 @@ FORMS.home = function(w){
       'Everything is kept in this browser, as it always was. Sign in to put this report on the server, where the team can open it and every save is kept.');
     off.appendChild(btn('Sign in', function(){ cloudState().offlineChosen = false; save(); gateShow(); }, 'primary'));
     w.appendChild(off);
-    homeGuides(w);
     return;
   }
 
@@ -10174,36 +10567,7 @@ FORMS.home = function(w){
       alist.appendChild(line);
     });
   }).catch(function(e){ clear(alist); alist.appendChild(el('p','', e.message)).className = 'callout bad'; });
-
-  homeGuides(w);
 };
-
-/* The short version of how the tool is meant to be used, where somebody
-   opening it for the first time will actually see it. */
-function homeGuides(w){
-  var g = card('How a report gets made', 'Each step is a screen on the left; you can do them in any order.');
-  var steps = [
-    ['Cover & report', 'The company, the financial year, the logo and the gate photograph.'],
-    ['Bill capture & verify', 'Drop the electricity bill PDFs in. The figures are read out and shown beside the bill \u2014 check them and press Verify.'],
-    ['Import field data', 'One drop box for every workbook: FOX KISEM, Thermo-X, JET-Eff, A-CMP and the PQ analyser\u2019s exports. Nothing is retyped.'],
-    ['Energy baseline & GHG', 'Months chosen from menus, production in the plant\u2019s own unit, and the emission factors; TOE, SEC and the charts follow.'],
-    ['The utilities', 'Switch on only what the plant has. Each chapter prints what its app measured.'],
-    ['Recommendations', 'On every chapter screen: the observation, the recommendation, the saving worked in the open, and the payback.'],
-    ['Print / PDF', 'True A4, one page per page. The Contents links to the pages and every chapter opens a new one.']
-  ];
-  steps.forEach(function(s, i){
-    var row = el('div','display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--line-2);');
-    row.appendChild(el('span','flex:0 0 22px;color:var(--ink-3);font-family:\'IBM Plex Mono\',monospace;', String(i + 1)));
-    var t = el('div','flex:1 1 auto;');
-    t.appendChild(el('strong','display:block;font-size:12.5px;', s[0]));
-    t.appendChild(el('span','font-size:12px;color:var(--ink-2);', s[1]));
-    row.appendChild(t);
-    g.appendChild(row);
-  });
-  g.appendChild(el('p','margin-top:10px;font-size:12px;color:var(--ink-3);',
-    'The sample report above is a finished one to look at: every chapter filled in, with the figures that produced it.'));
-  w.appendChild(g);
-}
 
 
 /* ===================================================================
@@ -12589,8 +12953,19 @@ q('demo').addEventListener('click', function(){
 
 renderAll();
 
-/* The sign-in page comes up over everything until it is answered - or
-   dismissed with "Work offline", which is remembered. */
-if (typeof gateNeeded === 'function' && gateNeeded()) gateShow();
+/* THE DOOR, OR STRAIGHT THROUGH IT.
+
+   A sign-in already in this browser is believed at once: the app opens on
+   the work, not on a password box, and not on a spinner either. The token
+   is then checked against the server in the background, which is where a
+   stale one is caught and where anything this browser holds and the server
+   does not gets pushed up.
+
+   No session, and no earlier "Work offline": the door. */
+if (typeof signedIn === 'function' && signedIn()){
+  cloudResume();
+} else if (typeof gateNeeded === 'function' && gateNeeded()){
+  gateShow();
+}
 
 </script>

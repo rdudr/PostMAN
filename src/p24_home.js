@@ -26,7 +26,7 @@ function gateDismiss(){
   document.body.classList.remove('gated');
   renderAll();
 }
-function gateShow(){
+function gateShow(why){
   document.body.classList.add('gated');
   var host = q('gate');
   clear(host);
@@ -45,6 +45,14 @@ function gateShow(){
   card1.appendChild(labelled('Email', em));
   card1.appendChild(labelled('Password', pw));
   var msg = el('p','margin-top:10px;'); msg.className = 'callout'; msg.hidden = true;
+  /* Why the door is being shown. A session that ran out says so, rather
+     than leaving somebody to wonder whether they typed the password wrong
+     last time. The draft is still in the browser, and saying that here is
+     the difference between a nuisance and a fright. */
+  if (why){
+    msg.hidden = false; msg.className = 'callout';
+    msg.textContent = why + (cloudAnyWork() ? ' Your report is still here — signing in puts it back on the server.' : '');
+  }
   var go = btn('Sign in', function(){
     if (!em.value.trim() || !pw.value){ msg.hidden = false; msg.className = 'callout bad'; msg.textContent = 'Email and password, please.'; return; }
     msg.hidden = false; msg.className = 'callout'; msg.textContent = 'Signing in…';
@@ -117,7 +125,7 @@ FORMS.home = function(w){
   var bar = el('div','display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;');
   bar.appendChild(btn('Carry on with this report', function(){ S.active = 'cover'; save(); renderAll(); }, 'primary'));
   if (signedIn()) bar.appendChild(btn(c.reportId ? 'Save now' : 'Put it on the server', function(){
-    cloudSave('manual save').then(function(){ renderAll(); }).catch(function(e){ alert(e.message); });
+    cloudRetryNow().then(function(){ renderAll(); });
   }));
   bar.appendChild(btn('Start a new report', function(){
     if (!confirm('Start a new, empty report?\n\nThis draft is replaced in this browser' +
@@ -125,10 +133,6 @@ FORMS.home = function(w){
     var sess = cloudSession();
     S = blankState(); cloudNewReport(sess);
     S.active = 'cover'; saveNow(); renderAll();
-  }));
-  bar.appendChild(btn('Load the sample report', function(){
-    if (!confirm('Load the worked example?\n\nIt replaces this draft with a complete report — bills, baseline, utilities and recommendations — to look at and take apart.')) return;
-    var b = document.getElementById('demo'); if (b) b.click();
   }));
   head.appendChild(bar);
   w.appendChild(head);
@@ -138,7 +142,6 @@ FORMS.home = function(w){
       'Everything is kept in this browser, as it always was. Sign in to put this report on the server, where the team can open it and every save is kept.');
     off.appendChild(btn('Sign in', function(){ cloudState().offlineChosen = false; save(); gateShow(); }, 'primary'));
     w.appendChild(off);
-    homeGuides(w);
     return;
   }
 
@@ -193,33 +196,4 @@ FORMS.home = function(w){
       alist.appendChild(line);
     });
   }).catch(function(e){ clear(alist); alist.appendChild(el('p','', e.message)).className = 'callout bad'; });
-
-  homeGuides(w);
 };
-
-/* The short version of how the tool is meant to be used, where somebody
-   opening it for the first time will actually see it. */
-function homeGuides(w){
-  var g = card('How a report gets made', 'Each step is a screen on the left; you can do them in any order.');
-  var steps = [
-    ['Cover & report', 'The company, the financial year, the logo and the gate photograph.'],
-    ['Bill capture & verify', 'Drop the electricity bill PDFs in. The figures are read out and shown beside the bill — check them and press Verify.'],
-    ['Import field data', 'One drop box for every workbook: FOX KISEM, Thermo-X, JET-Eff, A-CMP and the PQ analyser’s exports. Nothing is retyped.'],
-    ['Energy baseline & GHG', 'Months chosen from menus, production in the plant’s own unit, and the emission factors; TOE, SEC and the charts follow.'],
-    ['The utilities', 'Switch on only what the plant has. Each chapter prints what its app measured.'],
-    ['Recommendations', 'On every chapter screen: the observation, the recommendation, the saving worked in the open, and the payback.'],
-    ['Print / PDF', 'True A4, one page per page. The Contents links to the pages and every chapter opens a new one.']
-  ];
-  steps.forEach(function(s, i){
-    var row = el('div','display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--line-2);');
-    row.appendChild(el('span','flex:0 0 22px;color:var(--ink-3);font-family:\'IBM Plex Mono\',monospace;', String(i + 1)));
-    var t = el('div','flex:1 1 auto;');
-    t.appendChild(el('strong','display:block;font-size:12.5px;', s[0]));
-    t.appendChild(el('span','font-size:12px;color:var(--ink-2);', s[1]));
-    row.appendChild(t);
-    g.appendChild(row);
-  });
-  g.appendChild(el('p','margin-top:10px;font-size:12px;color:var(--ink-3);',
-    'The sample report above is a finished one to look at: every chapter filled in, with the figures that produced it.'));
-  w.appendChild(g);
-}

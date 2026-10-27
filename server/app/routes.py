@@ -91,6 +91,23 @@ def me(user: User = Depends(current_user)) -> dict:
     return {"id": user.id, "email": user.email, "name": user.name, "role": user.role}
 
 
+@router.post("/auth/refresh")
+def refresh(user: User = Depends(current_user)) -> dict:
+    """A fresh token for a session that is still good.
+
+    Tokens expire so that a stolen one stops working. A site visit is longer
+    than one token's life, though, and an assessor should not be thrown out
+    mid-report by a clock. The editor asks for a new one once its current
+    token is half-way through its life, which keeps a working session alive
+    indefinitely while an abandoned one still dies on schedule.
+    """
+    row = db.one("SELECT id, email, name, role, active FROM users WHERE id = %s", (user.id,))
+    if not row or not row[4]:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "That account is no longer active.")
+    return {"token": make_token(row[0], row[1], row[3]),
+            "user": {"id": row[0], "email": row[1], "name": row[2], "role": row[3]}}
+
+
 @router.post("/auth/password")
 def change_password(body: PasswordIn, user: User = Depends(current_user)) -> dict:
     row = db.one("SELECT password_hash FROM users WHERE id = %s", (user.id,))
@@ -142,6 +159,7 @@ class ReportIn(BaseModel):
     state: dict
     note: str = ""
     version: int | None = None   # the version the editor started from
+    client_mark: str = ""        # which editor save this is; see db.add_column
 
 
 def _row_to_card(r) -> dict:
@@ -170,10 +188,10 @@ def list_reports(_: User = Depends(current_user), archived: bool = False,
 def create_report(body: ReportIn, user: User = Depends(current_user)) -> dict:
     rid = db.new_id()
     db.run(
-        "INSERT INTO reports (id, title, company_name, financial_year, serial, report_no, state, version, owner_id, updated_by)"
-        " VALUES (%s, %s, %s, %s, %s, %s, %s, 1, %s, %s)",
+        "INSERT INTO reports (id, title, company_name, financial_year, serial, report_no, state, version, owner_id, updated_by, client_mark)"
+        " VALUES (%s, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s)",
         (rid, body.title, body.company_name, body.financial_year, body.serial, body.report_no,
-         db.dumps(body.state), user.id, user.id),
+         db.dumps(body.state), user.id, user.id, body.client_mark or None),
     )
     db.run("INSERT INTO report_versions (id, report_id, version, state, note, saved_by) VALUES (%s, %s, 1, %s, %s, %s)",
            (db.new_id(), rid, db.dumps(body.state), body.note or "created", user.id))
@@ -184,15 +202,19 @@ def create_report(body: ReportIn, user: User = Depends(current_user)) -> dict:
 
 
 @router.get("/reports/{report_id}")
-def get_report(report_id: str, _: User = Depends(current_user)) -> dict:
-    r = db.one("SELECT id, title, company_name, financial_year, serial, report_no, state, version, updated_at, updated_by, owner_id"
+def get_report(report_id: str, _: User = Depends(current_user), quiet: bool = False) -> dict:
+    r = db.one("SELECT id, title, company_name, financial_year, serial, report_no, state, version, updated_at, updated_by, owner_id, client_mark"
                " FROM reports WHERE id = %s", (report_id,))
     if not r:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such report.")
-    db.trail(_, "open", report_id, r[2] or r[1], "version %s" % r[7])
+    # The editor re-reads a report on every reload to check whether its own
+    # last push landed. That is not a person opening a report, and logging it
+    # as one would bury the real openings in noise.
+    if not quiet:
+        db.trail(_, "open", report_id, r[2] or r[1], "version %s" % r[7])
     return {"id": r[0], "title": r[1], "company_name": r[2], "financial_year": r[3], "serial": r[4],
             "report_no": r[5], "state": db.loads(r[6]), "version": r[7], "updated_at": _iso(r[8]),
-            "updated_by": r[9] or "", "owner_id": r[10] or ""}
+            "updated_by": r[9] or "", "owner_id": r[10] or "", "client_mark": r[11] or ""}
 
 
 @router.put("/reports/{report_id}")
@@ -210,9 +232,10 @@ def save_report(report_id: str, body: ReportIn, user: User = Depends(current_use
     nxt = cur[0] + 1
     db.run(
         "UPDATE reports SET title = %s, company_name = %s, financial_year = %s, serial = %s, report_no = %s,"
-        " state = %s, version = %s, updated_by = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+        " state = %s, version = %s, updated_by = %s, client_mark = %s, updated_at = CURRENT_TIMESTAMP"
+        " WHERE id = %s",
         (body.title, body.company_name, body.financial_year, body.serial, body.report_no,
-         db.dumps(body.state), nxt, user.id, report_id),
+         db.dumps(body.state), nxt, user.id, body.client_mark or None, report_id),
     )
     db.run("INSERT INTO report_versions (id, report_id, version, state, note, saved_by) VALUES (%s, %s, %s, %s, %s, %s)",
            (db.new_id(), report_id, nxt, db.dumps(body.state), body.note, user.id))

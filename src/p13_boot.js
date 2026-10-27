@@ -181,6 +181,17 @@ q('demo').addEventListener('click', function(){
 
 renderAll();
 
-/* The sign-in page comes up over everything until it is answered - or
-   dismissed with "Work offline", which is remembered. */
-if (typeof gateNeeded === 'function' && gateNeeded()) gateShow();
+/* THE DOOR, OR STRAIGHT THROUGH IT.
+
+   A sign-in already in this browser is believed at once: the app opens on
+   the work, not on a password box, and not on a spinner either. The token
+   is then checked against the server in the background, which is where a
+   stale one is caught and where anything this browser holds and the server
+   does not gets pushed up.
+
+   No session, and no earlier "Work offline": the door. */
+if (typeof signedIn === 'function' && signedIn()){
+  cloudResume();
+} else if (typeof gateNeeded === 'function' && gateNeeded()){
+  gateShow();
+}

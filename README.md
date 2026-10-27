@@ -19,15 +19,40 @@ built from the parts in `src/` by `python src/build.py`.
 ## Where the work is kept
 
 Every keystroke is saved in the browser, as it always was, and the tool runs
-with no network at all. Beside that there is now a server — **Server & my
-reports** in the Closing group — at
+with no network at all. Beside that there is now a server at
 `https://eass.eassiitgn.page` — the team's own machine at IIT Gandhinagar,
-published through the Cloudflare tunnel already running on it: sign in and the report is saved
-there too, listed for the whole team, with every earlier save kept. Two
-people on one report do not overwrite each other; the second save is refused
-and the editor offers to reload or to keep yours as a separate report. The
-server, its API and how to put it on Oracle Cloud are in
+published through the Cloudflare tunnel already running on it. Sign in and
+the report is kept there too, listed for the whole team, with every earlier
+save behind it. The server, its API and how to put it on Oracle Cloud are in
 [`server/README.md`](server/README.md).
+
+**Nothing is lost, and there is no gap between these four rules.**
+
+1. Every change goes into this browser at once — a local write that cannot
+   fail for want of a network.
+2. While you work, the server is kept a couple of seconds behind. A push
+   that fails retries itself — 5s, 10s, 20s, 40s, then every minute — rather
+   than waiting for you to type something else.
+3. Closing the tab, reloading, or just switching away from it pushes what is
+   outstanding there and then. A report is about 25 KB, so this normally
+   finishes even as the page goes.
+4. Anything rule 3 could not finish goes up the moment the app next opens,
+   before anything else. This is the one the other three lean on: a browser
+   being closed can never be relied upon, so nothing depends on it alone.
+
+**You stay signed in.** A reload opens straight back onto the work — no
+password, no spinner — and the session is checked against the server a
+moment later. A server that cannot be reached leaves you signed in, because
+a blip in a plant basement is not a reason to log anybody out; only a
+definite "that token is no longer valid" returns you to the sign-in page,
+with the reason on screen and the draft untouched. A session renews itself
+while it is in use, so a long day on site does not end in a surprise.
+
+**Two people on one report do not overwrite each other.** The second save is
+refused, saving pauses rather than retrying into the same wall, and the
+screen offers the two honest answers side by side: take theirs, or keep mine
+as a separate report. The editor can tell its own last save from a
+colleague's, so a reload is never mistaken for a clash.
 
 ## What it needs from the internet
 
