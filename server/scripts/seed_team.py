@@ -86,17 +86,45 @@ def show() -> None:
         print("  %-14s %-20s %-9s %s" % (email, name, role, "" if active else "switched off"))
 
 
+def from_pairs(pairs: list[str]) -> list[dict]:
+    """--set Rishabh=IITGN9 --set Abhay=IITGN1 ...
+
+    For setting the whole team up in one command, without a file to place
+    first. The passwords are then in your shell history and nowhere else -
+    which is the point: they must not end up in this repository, because it
+    is public.
+    """
+    rows = []
+    for p in pairs:
+        if "=" not in p:
+            raise SystemExit("--set wants username=password, not %r" % p)
+        user, _, password = p.partition("=")
+        user, password = user.strip(), password.strip()
+        if not user or not password:
+            raise SystemExit("--set wants username=password, not %r" % p)
+        rows.append({"username": user, "name": user, "password": password,
+                     "role": "admin" if user.lower() == "rishabh" else "engineer"})
+    return rows
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Create or update the team's PostMan accounts.")
     ap.add_argument("--file", default=DEFAULT_FILE, help="the account list (default: server/team.json)")
+    ap.add_argument("--set", action="append", default=[], metavar="USER=PASSWORD",
+                    help="one account, repeatable; used instead of the file")
     ap.add_argument("--list", action="store_true", help="show the accounts that exist and change nothing")
     args = ap.parse_args()
     if args.list:
         print("accounts on this server:")
         show()
     else:
-        print("seeding from %s" % args.file)
-        seed(load(args.file))
+        if args.set:
+            print("seeding %d account(s) from the command line" % len(args.set))
+            rows = from_pairs(args.set)
+        else:
+            print("seeding from %s" % args.file)
+            rows = load(args.file)
+        seed(rows)
         print("\naccounts on this server now:")
         show()
         print("\nEverybody signs in with their FOX username and password, and can\n"

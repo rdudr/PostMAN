@@ -174,8 +174,20 @@ notepad team.json              # the usernames are there; add the passwords
 .\.venv\Scripts\python scripts\seed_team.py --list
 ```
 
-`team.json` stays on this machine. It is gitignored, and the PostMan
-repository is public - a password committed to it is a password published.
+Or, without placing a file first, the whole team in one command:
+
+```powershell
+.\.venv\Scripts\python scripts\seed_team.py --set Abhay=... --set Rahulpatel=... --set DhruvIT=... --set Sagar=... --set Rishabh=... --set Faizan=...
+```
+
+Either way the passwords are the ones the team already uses in FOX, and
+`Rishabh` is made an admin so somebody can add an account later.
+
+**The passwords must not go into the repository.** `team.json` is
+gitignored and the `--set` form keeps them in your shell history instead,
+because the PostMan repository is **public** - a password committed to it is
+a password published. The same is true of KISEM FOX: its `prisma/seed.ts`
+has all six in plain sight today, so these are worth changing in both.
 
 ## 7. Publish it through the tunnel
 

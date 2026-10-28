@@ -64,6 +64,43 @@ function signedIn(){ var c = cloudState(); return !!(c.token && c.user); }
 /* One door to the API: the token goes on every call, an expired session is
    reported in words rather than as a 401 in the console, and a server that
    is simply not there says so without blaming the engineer. */
+/* What the server said, in words a person can act on.
+
+   FastAPI answers a rejected field with `detail` as a LIST of objects -
+   {loc, msg, type} - not a string. Handing that to new Error() printed
+   "[object Object]" on the sign-in screen, which tells somebody standing in
+   a plant that something is wrong and nothing else. Every shape `detail`
+   can take is turned into a sentence here, once. */
+function cloudSays(j, r){
+  var d = j && j.detail;
+  var out = '';
+  if (typeof d === 'string') out = d;
+  else if (Array.isArray(d)){
+    out = d.map(function(x){
+      if (typeof x === 'string') return x;
+      var where = (x && Array.isArray(x.loc)) ? x.loc[x.loc.length - 1] : '';
+      var msg = (x && (x.msg || x.message)) || '';
+      /* "body > email: ..." helps nobody; the field name alone does. */
+      return where && where !== 'body' ? where + ': ' + msg : msg;
+    }).filter(Boolean).join('; ');
+  } else if (d && typeof d === 'object'){
+    out = d.msg || d.message || '';
+  }
+  if (!out && j && typeof j.message === 'string') out = j.message;
+  if (!out) out = (r ? r.status + ' ' + (r.statusText || '') : '').trim() || 'The server refused that.';
+
+  /* One case worth naming outright, because the answer is a deployment and
+     not anything the person at the keyboard did: this build invites a FOX
+     username, and a server that has not been updated yet still insists on
+     an email address and rejects it before anyone can sign in. */
+  if (r && r.status === 422 && /email/i.test(out)){
+    out = 'This server has not been updated yet — it still expects an email address, ' +
+          'not a KISEM FOX username. Ask for it to be updated (git pull, restart ' +
+          'EASS-API, then seed_team.py), or sign in with an email account it knows.';
+  }
+  return out;
+}
+
 function cloudFetch(path, opts){
   opts = opts || {};
   var c = cloudState();
@@ -79,13 +116,13 @@ function cloudFetch(path, opts){
          that it always does the same things wherever the 401 surfaced:
          forget the token, keep the draft, remember why, show the door. */
       return r.json().catch(function(){ return {}; }).then(function(j){
-        var why = j.detail || 'Your session has ended.';
+        var why = cloudSays(j, r) || 'Your session has ended.';
         cloudEndSession(why);
         throw new Error(why + ' Your work is safe in this browser.');
       });
     }
     if (!r.ok) return r.json().catch(function(){ return {}; }).then(function(j){
-      var e = new Error(j.detail || (r.status + ' ' + r.statusText)); e.status = r.status; throw e;
+      var e = new Error(cloudSays(j, r)); e.status = r.status; throw e;
     });
     return r.status === 204 ? null : r.json();
   }, function(){
