@@ -40,9 +40,9 @@ function gateShow(why){
   card1.appendChild(el('div','font-size:12.5px;color:var(--ink-3);margin-bottom:14px;',
     'Your reports, the team’s reports and every file the field apps have sent.'));
 
-  /* Plain text, not type=email: these are KISEM FOX usernames. */
-  var em = el('input'); em.type = 'text'; em.placeholder = 'your KISEM FOX username'; em.autocomplete = 'username';
-  var pw = el('input'); pw.type = 'password'; pw.placeholder = 'Password'; pw.autocomplete = 'current-password';
+  /* Plain text, not type=email: these are usernames, not addresses. */
+  var em = el('input'); em.type = 'text'; em.placeholder = 'username'; em.autocomplete = 'username';
+  var pw = el('input'); pw.type = 'password'; pw.placeholder = 'password'; pw.autocomplete = 'current-password';
   card1.appendChild(labelled('Username', em));
   card1.appendChild(labelled('Password', pw));
   var msg = el('p','margin-top:10px;'); msg.className = 'callout'; msg.hidden = true;
@@ -84,8 +84,6 @@ function gateShow(why){
     'The KISEM server at IIT Gandhinagar. Change it only to work against another one.'));
   box.appendChild(srv);
 
-  box.appendChild(el('p','margin-top:18px;font-size:12px;color:var(--ink-3);',
-    'Sign in with the same username and password you use in KISEM FOX — so that every save carries your name, and nobody has two sets to remember. Working offline keeps everything in this browser; you can sign in later and push the report up.'));
   host.appendChild(box);
   setTimeout(function(){ em.focus(); }, 60);
 }

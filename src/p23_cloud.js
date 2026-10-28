@@ -94,8 +94,8 @@ function cloudSays(j, r){
      username, and a server that has not been updated yet still insists on
      an email address and rejects it before anyone can sign in. */
   if (r && r.status === 422 && /email/i.test(out)){
-    out = 'This server has not been updated yet — it still expects an email address, ' +
-          'not a KISEM FOX username. Ask for it to be updated (git pull, restart ' +
+    out = 'This server has not been updated yet — it still expects an email address ' +
+          'rather than a username. Ask for it to be updated (git pull, restart ' +
           'EASS-API, then seed_team.py), or sign in with an email account it knows.';
   }
   return out;
@@ -704,7 +704,7 @@ FORMS.cloud = function(w){
 
   if (!signedIn()){
     var form = el('div','display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px;');
-    var em = el('input'); em.type = 'text'; em.placeholder = 'your KISEM FOX username'; em.autocomplete = 'username';
+    var em = el('input'); em.type = 'text'; em.placeholder = 'username'; em.autocomplete = 'username';
     var pw = el('input'); pw.type = 'password'; pw.placeholder = 'password'; pw.autocomplete = 'current-password';
     form.appendChild(labelled('Username', em));
     form.appendChild(labelled('Password', pw));
@@ -719,7 +719,7 @@ FORMS.cloud = function(w){
     c1.appendChild(btn('Sign in', go, 'primary'));
     c1.appendChild(msg);
     c1.appendChild(el('p','margin-top:8px;font-size:12px;color:var(--ink-3);',
-      'The same username and password as KISEM FOX. No account? An administrator makes one — accounts are not self-service, because a report carries a client’s measurements.'));
+      'No account? An administrator makes one — accounts are not self-service, because a report carries a client’s measurements.'));
     w.appendChild(c1);
     return;
   }
