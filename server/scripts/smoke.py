@@ -69,6 +69,23 @@ with TestClient(app) as c:
     check("an engineer cannot add accounts",
           c.post("/api/users", headers=eng, json={"email": "x@y.z", "name": "x", "password": "12345678"}).status_code == 403)
 
+    print("signing in with a FOX username, not an email")
+    r = c.post("/api/users", headers=admin,
+               json={"email": "Rahulpatel", "name": "Rahul Patel", "password": "fox-password-1", "role": "engineer"})
+    check("an account can be a plain username", r.status_code == 200, r.text)
+    r = c.post("/api/auth/login", json={"email": "Rahulpatel", "password": "fox-password-1"})
+    check("and that username signs in", r.status_code == 200, r.text)
+    check("case does not matter",
+          c.post("/api/auth/login", json={"email": "RAHULPATEL", "password": "fox-password-1"}).status_code == 200)
+    check("the wrong password is still refused",
+          c.post("/api/auth/login", json={"email": "Rahulpatel", "password": "nope"}).status_code == 401)
+    check("the display name is what the trail will show",
+          r.json()["user"]["name"] == "Rahul Patel", r.json()["user"])
+    check("a username with a space is refused",
+          c.post("/api/auth/login", json={"email": "rahul patel", "password": "x"}).status_code == 422)
+    check("a malformed address is still refused",
+          c.post("/api/auth/login", json={"email": "rahul@", "password": "x"}).status_code == 422)
+
     print("staying signed in")
     r = c.post("/api/auth/refresh", headers=eng)
     check("a live session can swap its token for a fresh one", r.status_code == 200, r.text)
@@ -124,6 +141,7 @@ with TestClient(app) as c:
     check("a push may carry a mark", r.status_code == 200, r.text)
     got = c.get("/api/reports/" + rid, headers=eng).json()
     check("and the mark comes back with the report", got["client_mark"] == "mark-abc-123", got.get("client_mark"))
+    check("a report says WHO saved it by name, not by id", got["updated_by"] == "Rahul", got.get("updated_by"))
     r = c.put("/api/reports/" + rid, headers=eng,
               json={"title": "t", "company_name": "Shree Mahadev Silk Mills", "financial_year": "2026-27",
                     "serial": 1, "report_no": "x", "state": state2, "version": got["version"],

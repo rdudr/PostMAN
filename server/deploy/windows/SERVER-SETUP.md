@@ -161,6 +161,22 @@ Sleep and power settings are already handled if `harden-server.ps1` has been
 run on this machine — it also installs the tunnel watchdog. If you are not
 sure it has, run it; it is safe to run twice.
 
+## 6b. The team's accounts, from KISEM FOX
+
+Everybody signs in to PostMan with the username and password they already
+use in **KISEM FOX**, so there is no second pair to remember and the
+activity trail names the person who did each thing.
+
+```powershell
+copy team.example.json team.json
+notepad team.json              # the usernames are there; add the passwords
+.\.venv\Scripts\python scripts\seed_team.py
+.\.venv\Scripts\python scripts\seed_team.py --list
+```
+
+`team.json` stays on this machine. It is gitignored, and the PostMan
+repository is public - a password committed to it is a password published.
+
 ## 7. Publish it through the tunnel
 
 The tunnel already carries `api.eassiitgn.page`. You are adding a second

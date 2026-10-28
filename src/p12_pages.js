@@ -188,7 +188,7 @@ function renderCover(){
   return p;
 }
 
-function renderPage(n, content, guides){
+function renderPage(n, content){
   var p = el('div','position:relative;width:' + px(PAGE.w) + ';height:' + px(PAGE.h) +
     ';background:#fff;color:' + C.charcoal + ';font-family:' + F.body + ';overflow:hidden;');
   var add = function(n2){ p.appendChild(n2); return n2; };
@@ -227,8 +227,7 @@ function renderPage(n, content, guides){
   add(at(532.9, 757.5, 60, 'font-family:' + F.cond2 + ';font-weight:700;font-size:' + px(24.7) +
     ';line-height:1;color:' + C.red + ';', pageNo(n)));
 
-  var live = add(el('div', box(LIVE.l, LIVE.t, LIVE.w, LIVE.h) + 'overflow:hidden;' +
-    (guides ? 'outline:' + px(0.5) + ' dashed ' + C.blue + ';' : '')));
+  var live = add(el('div', box(LIVE.l, LIVE.t, LIVE.w, LIVE.h) + 'overflow:hidden;'));
   /* Tagged so the pre-export check - and any test - can ask each page
      directly whether anything overflowed, instead of eyeballing PDFs. */
   live.dataset.live = '1';
@@ -384,7 +383,6 @@ function drawPreview(){
      on every keystroke is pure waste. */
   if (document.body.classList.contains('verify-mode')) return;
   var zoom = parseFloat(q('zoom').value);
-  var guides = q('guides').checked;
   var W = PAGE.w * PT * zoom, H = PAGE.h * PT * zoom;
 
   var built = paginateWithToc();
@@ -403,7 +401,7 @@ function drawPreview(){
     stack.appendChild(wrap);
   }
   shell(renderCover(), 'pg-cover');
-  pages.forEach(function(content, i){ shell(renderPage(i+1, content, guides), 'pg-' + (i + PAGE_BADGE_OFFSET)); });
+  pages.forEach(function(content, i){ shell(renderPage(i+1, content), 'pg-' + (i + PAGE_BADGE_OFFSET)); });
 
   /* A contents line is a real link on screen and plain text on paper. */
   stack.addEventListener('click', function(ev){

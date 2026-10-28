@@ -280,10 +280,6 @@ body.gated #top,body.gated #shell{display:none!important}
         <option value="1">100%</option>
       </select>
     </label>
-    <label class="meta" style="display:flex;align-items:center;gap:4px">
-      <input type="checkbox" id="guides"> Guides
-    </label>
-    <button class="btn sm" id="demo">Load sample</button>
     <button class="btn sm" id="reset">Reset</button>
     <button class="btn primary sm" id="print">Print / PDF</button>
   </div>
@@ -9649,8 +9645,9 @@ function cloudLogin(email, password){
     .then(function(r){
       var c = cloudState();
       c.token = r.token; c.user = r.user; c.tokenAt = Date.now();
-      c.lastError = ''; CLOUD_FAILS = 0; CLOUD_CONFLICT = '';
+      c.lastError = ''; CLOUD_FAILS = 0; CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = '';
       saveNow();
+      cloudWatchStart();
       /* Whatever this browser holds and the server does not, goes up now. */
       cloudPush('signed in');
       return r.user;
@@ -9668,6 +9665,7 @@ function cloudEndSession(why){
   c.lastError = why || '';
   c.offlineChosen = false;             /* so the door asks again */
   clearTimeout(CLOUD_T); CLOUD_T = null;
+  clearInterval(CLOUD_WATCH); CLOUD_WATCH = null; CLOUD_THEIRS = null;
   saveNow();
   if (typeof gateShow === 'function') gateShow(why || ''); else renderAll();
 }
@@ -9710,6 +9708,7 @@ function cloudResume(){
     return cloudRenewIfStale();
   }).then(function(){
     paintCloudStrip();
+    cloudWatchStart();                 /* and keep an eye on what the others do */
     return cloudReconcile();           /* rule 4: catch the server up, first thing */
   }).then(function(){
     return true;
@@ -9767,8 +9766,10 @@ function cloudReconcile(){
     }
 
     /* Somebody else's save is the newest one. Do not touch it. */
-    CLOUD_CONFLICT = 'This report has moved on since you last had it \u2014 the server is on version ' +
-      r.version + ' and you were on ' + c.version + '.';
+    CLOUD_CONFLICT_WHO = r.updated_by || '';
+    CLOUD_CONFLICT = (r.updated_by ? r.updated_by + ' has saved this report since you last had it'
+                                   : 'This report has moved on since you last had it') +
+      ' \u2014 the server is on version ' + r.version + ', you were on ' + c.version + '.';
     clearTimeout(CLOUD_T); CLOUD_T = null;
     paintCloudStrip();
     return false;
@@ -9830,7 +9831,7 @@ function cloudNewReport(sess){
               offlineChosen:!!sess.offlineChosen,
               reportId:'', version:0, lastSaved:'', lastError:'', dirty:false };
   CLOUD_SIG = '';
-  CLOUD_CONFLICT = ''; CLOUD_FAILS = 0;
+  CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = ''; CLOUD_FAILS = 0;
   clearTimeout(CLOUD_T); CLOUD_T = null;
 }
 
@@ -9879,6 +9880,7 @@ function cloudSave(note){
   }
   return p.then(function(r){
     CLOUD_SIG = JSON.stringify(body.state);
+    if (CLOUD_THEIRS && CLOUD_THEIRS.version <= r.version) CLOUD_THEIRS = null;
     c.reportId = r.id; c.version = r.version; c.dirty = false; c.lastError = '';
     c.lastSaved = new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
     save(); paintCloudStrip();
@@ -9892,7 +9894,7 @@ function cloudSave(note){
 function cloudSaveAsCopy(){
   var c = cloudState();
   c.reportId = ''; c.version = 0;
-  CLOUD_CONFLICT = ''; CLOUD_FAILS = 0;
+  CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = ''; CLOUD_FAILS = 0;
   return cloudSave('copy kept after a clash');
 }
 function cloudOpen(id){
@@ -9900,12 +9902,13 @@ function cloudOpen(id){
     var keep = cloudState();
     var cloud = { server:keep.server, token:keep.token, user:keep.user, tokenAt:keep.tokenAt,
                   autosave:keep.autosave, offlineChosen:keep.offlineChosen,
-                  reportId:r.id, version:r.version, lastSaved:'opened', lastError:'', dirty:false };
+                  reportId:r.id, version:r.version, lastSaved:'', lastError:'', dirty:false };
     S = deepMerge(blankState(), r.state || {});
     S.cloud = cloud;
     if (typeof migrateState === 'function') migrateState();
     CLOUD_SIG = cloudSig();      /* just arrived from the server - nothing to push */
-    CLOUD_CONFLICT = ''; CLOUD_FAILS = 0;
+    CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = ''; CLOUD_FAILS = 0;
+    CLOUD_THEIRS = null;
     clearTimeout(CLOUD_T); CLOUD_T = null;
     saveNow(); renderAll();
     return r;
@@ -9927,6 +9930,7 @@ var CLOUD_BUSY = false;        /* one at a time, so two saves cannot race */
 var CLOUD_AGAIN = false;       /* something changed while one was in flight */
 var CLOUD_FAILS = 0;          /* consecutive failures, for the backoff */
 var CLOUD_CONFLICT = '';       /* set when the server says somebody else saved */
+var CLOUD_CONFLICT_WHO = '';   /* and who it was, when the server tells us */
 var CLOUD_DELAY = 2500;        /* how far behind the server runs while typing */
 var CLOUD_FLUSHED = '';        /* the content already sent on the way out */
 
@@ -9974,9 +9978,12 @@ function cloudPush(note, force){
   }).catch(function(e){
     if (e && e.status === 409){
       /* Two people, one report. Retrying would fail for ever and bury the
-         choice, so autosaving stops here until somebody decides. */
+         choice, so autosaving stops here until somebody decides. Ask who it
+         was, because "Rahul has saved this report" is something you can act
+         on and "there was a conflict" is not. */
       CLOUD_CONFLICT = e.message;
       clearTimeout(CLOUD_T); CLOUD_T = null;
+      cloudWhoSaved();
     } else if (signedIn()){
       CLOUD_FAILS++;
       cloudArm(cloudBackoff());        /* rule 2: try again by itself */
@@ -10071,29 +10078,41 @@ function paintCloudStrip(){
   var line, tone = '';
 
   if (CLOUD_CONFLICT){
-    line = 'somebody else has saved this report';
+    line = (CLOUD_CONFLICT_WHO ? CLOUD_CONFLICT_WHO + ' has saved this report' : 'somebody else has saved this report');
     tone = 'var(--bad)';
   } else if (!c.reportId){
     line = 'not on the server yet';
-  } else if (CLOUD_BUSY){
+  } else if (CLOUD_BUSY || c.dirty){
     line = 'saving\u2026';
   } else if (c.lastError){
     line = CLOUD_FAILS ? 'not saved \u2014 trying again' : 'not saved \u2014 ' + c.lastError;
     tone = 'var(--bad)';
-  } else if (c.dirty){
-    line = 'saving\u2026';
   } else {
-    line = 'saved ' + (c.lastSaved || '') + ' \u00B7 v' + c.version;
+    /* "saved 15:04 \u00B7 v13" once something has been saved from here, and
+       "up to date \u00B7 v13" when the report simply arrived that way. It used
+       to print the word "opened" where the time goes. */
+    line = (c.lastSaved ? 'saved ' + c.lastSaved : 'up to date') + ' \u00B7 v' + c.version;
   }
   var label = el('span','', who + ' \u00B7 ' + line);
   if (tone) label.style.color = tone;
   host.appendChild(label);
 
-  if (CLOUD_CONFLICT){
-    host.appendChild(btn('What now?', function(){ S.active = 'cloud'; save(); renderAll(); }, 'sm primary'));
-    return;
+  /* A colleague has saved while this was open. Not an error, not a clash -
+     just news, with the one thing you would want to do about it. */
+  if (CLOUD_THEIRS && !CLOUD_CONFLICT){
+    var n = el('span','color:var(--accent);',
+      ' \u00B7 ' + (CLOUD_THEIRS.who || 'somebody') + ' saved v' + CLOUD_THEIRS.version);
+    host.appendChild(n);
+    host.appendChild(btn('Load theirs', cloudTakeNewer, 'sm'));
   }
-  if (c.lastError){
+
+  /* These two never go away. A clash used to replace them with a single
+     "What now?", which took Save and My reports off the screen exactly when
+     somebody needed to get out of the report they were stuck in. A clash is
+     a notice, not a trap. */
+  if (CLOUD_CONFLICT){
+    host.appendChild(btn('Sort it out', function(){ S.active = 'cloud'; save(); renderAll(); }, 'sm primary'));
+  } else if (c.lastError){
     host.appendChild(btn('Try now', function(){ cloudRetryNow(); }, 'sm primary'));
   } else {
     host.appendChild(btn(c.reportId ? 'Save now' : 'Save to the server', function(){
@@ -10103,14 +10122,70 @@ function paintCloudStrip(){
   host.appendChild(btn('My reports', function(){ S.active = 'cloud'; save(); renderAll(); }, 'sm'));
 }
 
+/* ------------------------------------------------------------------
+   WATCHING FOR SOMEBODY ELSE'S WORK
+
+   Two people on one report used to find out about each other only by
+   colliding: the first to save won, the second got a clash out of nowhere.
+   So while a report is open, ask the server every half minute whether its
+   version has moved. If it has and WE did not move it, say so quietly -
+   with the colleague's name and one button to take their copy - long
+   before anybody has typed themselves into a conflict.
+
+   It is a HEAD-weight question on a 25 KB document, once every 30s, per
+   open editor. On a team of six that is nothing.
+   ------------------------------------------------------------------ */
+var CLOUD_WATCH = null;
+var CLOUD_THEIRS = null;       /* {version, who, at} seen on the server */
+var CLOUD_WATCH_MS = 30000;
+
+function cloudWatchStart(){
+  clearInterval(CLOUD_WATCH);
+  CLOUD_WATCH = setInterval(cloudWatchTick, CLOUD_WATCH_MS);
+}
+function cloudWatchTick(){
+  var c = cloudState();
+  if (!signedIn() || !c.reportId || CLOUD_BUSY || CLOUD_CONFLICT) return;
+  if (document.visibilityState === 'hidden') return;   /* nobody is looking */
+  cloudFetch('/api/reports?company=' + encodeURIComponent(c.company_name || (S.company && S.company.name) || ''))
+    .then(function(rows){
+      var mine = null, i;
+      for (i = 0; i < rows.length; i++) if (rows[i].id === c.reportId) { mine = rows[i]; break; }
+      if (!mine) return;
+      if (mine.version > c.version){
+        CLOUD_THEIRS = { version:mine.version, who:mine.updated_by || '', at:mine.updated_at || '' };
+      } else {
+        CLOUD_THEIRS = null;
+      }
+      paintCloudStrip();
+    }).catch(function(){ /* the strip already says when the server is away */ });
+}
+/* Taking what a colleague saved, when the watcher has offered it. */
+function cloudTakeNewer(){
+  var c = cloudState();
+  if (cloudBehind() && !confirm('Load the newer copy?\n\nYou have changes here that are not on the server yet, and they would be replaced.')) return;
+  CLOUD_THEIRS = null;
+  return cloudOpen(c.reportId).catch(function(e){ alert(e.message); });
+}
+
+/* Who made the save we just lost a race to. Best effort and silent: the
+   notice is already on screen; this only puts a name on it. */
+function cloudWhoSaved(){
+  var c = cloudState();
+  if (!c.reportId) return;
+  cloudFetch('/api/reports/' + encodeURIComponent(c.reportId) + '?quiet=true')
+    .then(function(r){ CLOUD_CONFLICT_WHO = r.updated_by || ''; paintCloudStrip(); })
+    .catch(function(){});
+}
+
 /* ---- the two ways out of a clash, in one place ---------------------- */
 function cloudTakeTheirs(){
   var c = cloudState();
-  CLOUD_CONFLICT = '';
+  CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = '';
   return cloudOpen(c.reportId);
 }
 function cloudKeepMine(){
-  CLOUD_CONFLICT = '';
+  CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = '';
   return cloudSaveAsCopy();
 }
 
@@ -10131,9 +10206,9 @@ FORMS.cloud = function(w){
 
   if (!signedIn()){
     var form = el('div','display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px;');
-    var em = el('input'); em.type = 'email'; em.placeholder = 'you@iitgn.ac.in'; em.autocomplete = 'username';
+    var em = el('input'); em.type = 'text'; em.placeholder = 'your KISEM FOX username'; em.autocomplete = 'username';
     var pw = el('input'); pw.type = 'password'; pw.placeholder = 'password'; pw.autocomplete = 'current-password';
-    form.appendChild(labelled('Email', em));
+    form.appendChild(labelled('Username', em));
     form.appendChild(labelled('Password', pw));
     c1.appendChild(form);
     var msg = el('p',''); msg.className = 'callout'; msg.hidden = true;
@@ -10146,7 +10221,7 @@ FORMS.cloud = function(w){
     c1.appendChild(btn('Sign in', go, 'primary'));
     c1.appendChild(msg);
     c1.appendChild(el('p','margin-top:8px;font-size:12px;color:var(--ink-3);',
-      'No account? An administrator makes one for you \u2014 accounts are not self-service, because a report carries a client\u2019s measurements.'));
+      'The same username and password as KISEM FOX. No account? An administrator makes one \u2014 accounts are not self-service, because a report carries a client\u2019s measurements.'));
     w.appendChild(c1);
     return;
   }
@@ -10190,8 +10265,9 @@ FORMS.cloud = function(w){
     }));
     cf.appendChild(cfb);
     c2.appendChild(cf);
-    w.appendChild(c2);
-    return;        /* one decision at a time */
+    /* The rest of this screen still draws. It used to stop here, which meant
+       a clash also took away the list of reports - so the one screen that
+       could get you out of the stuck report was the screen that hid it. */
   }
 
   if (c.lastError) c2.appendChild(el('p','', c.lastError)).className = 'callout bad';
@@ -10411,9 +10487,10 @@ function gateShow(why){
   card1.appendChild(el('div','font-size:12.5px;color:var(--ink-3);margin-bottom:14px;',
     'Your reports, the team\u2019s reports and every file the field apps have sent.'));
 
-  var em = el('input'); em.type = 'email'; em.placeholder = 'you@iitgn.ac.in'; em.autocomplete = 'username';
+  /* Plain text, not type=email: these are KISEM FOX usernames. */
+  var em = el('input'); em.type = 'text'; em.placeholder = 'your KISEM FOX username'; em.autocomplete = 'username';
   var pw = el('input'); pw.type = 'password'; pw.placeholder = 'Password'; pw.autocomplete = 'current-password';
-  card1.appendChild(labelled('Email', em));
+  card1.appendChild(labelled('Username', em));
   card1.appendChild(labelled('Password', pw));
   var msg = el('p','margin-top:10px;'); msg.className = 'callout'; msg.hidden = true;
   /* Why the door is being shown. A session that ran out says so, rather
@@ -10425,7 +10502,7 @@ function gateShow(why){
     msg.textContent = why + (cloudAnyWork() ? ' Your report is still here \u2014 signing in puts it back on the server.' : '');
   }
   var go = btn('Sign in', function(){
-    if (!em.value.trim() || !pw.value){ msg.hidden = false; msg.className = 'callout bad'; msg.textContent = 'Email and password, please.'; return; }
+    if (!em.value.trim() || !pw.value){ msg.hidden = false; msg.className = 'callout bad'; msg.textContent = 'Username and password, please.'; return; }
     msg.hidden = false; msg.className = 'callout'; msg.textContent = 'Signing in\u2026';
     go.disabled = true;
     cloudLogin(em.value.trim(), pw.value).then(function(){
@@ -10455,7 +10532,7 @@ function gateShow(why){
   box.appendChild(srv);
 
   box.appendChild(el('p','margin-top:18px;font-size:12px;color:var(--ink-3);',
-    'One account for the team, made when the server was set up. Working offline keeps everything in this browser \u2014 you can sign in later and push the report up.'));
+    'Sign in with the same username and password you use in KISEM FOX \u2014 so that every save carries your name, and nobody has two sets to remember. Working offline keeps everything in this browser; you can sign in later and push the report up.'));
   host.appendChild(box);
   setTimeout(function(){ em.focus(); }, 60);
 }
@@ -12491,7 +12568,7 @@ function renderCover(){
   return p;
 }
 
-function renderPage(n, content, guides){
+function renderPage(n, content){
   var p = el('div','position:relative;width:' + px(PAGE.w) + ';height:' + px(PAGE.h) +
     ';background:#fff;color:' + C.charcoal + ';font-family:' + F.body + ';overflow:hidden;');
   var add = function(n2){ p.appendChild(n2); return n2; };
@@ -12530,8 +12607,7 @@ function renderPage(n, content, guides){
   add(at(532.9, 757.5, 60, 'font-family:' + F.cond2 + ';font-weight:700;font-size:' + px(24.7) +
     ';line-height:1;color:' + C.red + ';', pageNo(n)));
 
-  var live = add(el('div', box(LIVE.l, LIVE.t, LIVE.w, LIVE.h) + 'overflow:hidden;' +
-    (guides ? 'outline:' + px(0.5) + ' dashed ' + C.blue + ';' : '')));
+  var live = add(el('div', box(LIVE.l, LIVE.t, LIVE.w, LIVE.h) + 'overflow:hidden;'));
   /* Tagged so the pre-export check - and any test - can ask each page
      directly whether anything overflowed, instead of eyeballing PDFs. */
   live.dataset.live = '1';
@@ -12687,7 +12763,6 @@ function drawPreview(){
      on every keystroke is pure waste. */
   if (document.body.classList.contains('verify-mode')) return;
   var zoom = parseFloat(q('zoom').value);
-  var guides = q('guides').checked;
   var W = PAGE.w * PT * zoom, H = PAGE.h * PT * zoom;
 
   var built = paginateWithToc();
@@ -12706,7 +12781,7 @@ function drawPreview(){
     stack.appendChild(wrap);
   }
   shell(renderCover(), 'pg-cover');
-  pages.forEach(function(content, i){ shell(renderPage(i+1, content, guides), 'pg-' + (i + PAGE_BADGE_OFFSET)); });
+  pages.forEach(function(content, i){ shell(renderPage(i+1, content), 'pg-' + (i + PAGE_BADGE_OFFSET)); });
 
   /* A contents line is a real link on screen and plain text on paper. */
   stack.addEventListener('click', function(ev){
@@ -12776,7 +12851,6 @@ function renderAll(){
 loadState();
 
 q('zoom').addEventListener('change', drawPreview);
-q('guides').addEventListener('change', drawPreview);
 q('print').addEventListener('click', function(){ window.print(); });
 q('reset').addEventListener('click', function(){
   if (!confirm('Clear this draft and start a new report?')) return;
@@ -12816,140 +12890,6 @@ syncNavToggle();
   var fits = opts.filter(function(z){ return PAGE.w * PT * z <= avail; });
   sel.value = String(fits.length ? Math.max.apply(null, fits) : opts[0]);
 })();
-
-/* ---- sample data: the Shree Mahadev silk mill, so the tool can be judged
-   with a real shape of report rather than an empty one. ---- */
-q('demo').addEventListener('click', function(){
-  if (S.company.name && !confirm('Replace the current draft with the sample report?')) return;
-  var sess = cloudSession();
-  S = blankState(); cloudNewReport(sess);
-  S.company = { name:'Shree Mahadev Silk Mills Pvt. Ltd.',
-    addr1:'Survey No. 142, Kadodara\u2013Bardoli Road', addr2:'Palsana Industrial Estate',
-    district:'Surat', state:'Gujarat', pincode:'394315',
-    website:'', phone:'', mail:'', poc:'Mr. Subhajit Bose',
-    pocRole:'Manager \u2013 Utilities', dept:'the electrical maintenance team' };
-  S.meta.financialYear = '2026-27';
-  S.meta.preparedBy = 'Rahul Jayantibhai Patel';
-  S.costs = { unitRate:8.4, fuelType:'Coal', fuelCost:9500, fuelUnit:'tonne', gcv:4200,
-    evapRatio:4.5, days:350, gridEF:0.716, gridSrc:'CEA CO2 Baseline Database v21.0, Dec 2025',
-    fuelEF:2380, fuelSrc:'UK DEFRA GHG conversion factors 2025' };
-  S.team.plant = [
-    { sr:1, name:'Mr. Subhajit Bose', role:'Manager \u2013 Utilities' },
-    { sr:2, name:'Mr. Hitesh Patel', role:'Electrical Supervisor' }
-  ];
-  S.production.intro = 'Shree Mahadev Silk Mills is a textile processing unit engaged in dyeing and finishing of synthetic and blended fabrics.\nThe plant runs jet dyeing machines, a coal-fired boiler and a thermic fluid heater supplying the stenter line, with a connected load of approximately 1.2 MW.';
-  S.production.products = [
-    { sr:1, product:'Dyed polyester fabric', cas:'\u2014', status:'Commercial' },
-    { sr:2, product:'Finished blended fabric', cas:'\u2014', status:'Commercial' }
-  ];
-  S.baseline.thermalName = 'Coal'; S.baseline.thermalUnit = 'Tonne';
-  var labels = fyMonths('2026-27');
-  var kwhSeed = [248,262,271,286,301,294,277,265,258,269,281,275];
-  var coalSeed = [86,91,94,99,104,102,96,92,89,93,97,95];
-  S.baseline.elec = labels.map(function(m,i){ return { month:m, kwh:kwhSeed[i]*1000 }; });
-  S.baseline.thermal = labels.map(function(m,i){ return { month:m, qty:coalSeed[i] }; });
-  S.baseline._v2 = false; normalizeBaseline(); S.baseline.prodUnit = 'Metre';
-  S.baseline.months.forEach(function(p, i){ S.baseline.production[monthKey(p.y, p.m)] = [10769968,8840359,7429131,9989305,11313311,11943126,7279559,10059122,11810536,11232890,10500000,10900000][i]; });
-  syncBaselineLegacy();
-  var mdSeed = [597,612,628,641,666,655,624,601,589,608,631,619];
-  var pfSeed = [0.962,0.958,0.949,0.941,0.936,0.944,0.951,0.955,0.947,0.938,0.952,0.961];
-  S.bills = labels.map(function(m,i){
-    var kwh = kwhSeed[i]*1000, kvah = Math.round(kwh / pfSeed[i]);
-    var energy = Math.round(kwh * 6.1), demand = Math.round(Math.max(mdSeed[i], 0.85*800) * 380);
-    var fppa = Math.round(kwh * 1.15), duty = Math.round((energy + demand) * 0.15);
-    return { month:m, contract:800, actualMD:mdSeed[i],
-      billingDemand:Math.round(Math.max(mdSeed[i], 0.85*800)), kwh:kwh, kvah:kvah,
-      pf:pfSeed[i], energyCharge:energy, demandCharge:demand, fuelSurcharge:fppa,
-      duty:duty, other:0, rebate:0, net:energy+demand+fppa+duty,
-      todNight:Math.round(kwh*0.33), todPeak:Math.round(kwh*0.11) };
-  });
-  S.billCfg = blankBillCfg(); S.billCfg.discom = 'MGVCL'; S.billCfg.consumerNo = '14004'; S.billCfg.contractDemand = 800;
-  S.billNotes.pfNote = 'The monthly power factor dropped below the desirable level of 0.95 in five months, with the lowest recorded value 0.936. A low power factor forfeits the utility rebate and increases reactive current, system losses and transformer loading.';
-  S.billNotes.cdNote = 'The plant operates at a contract demand of 800 kVA against a highest recorded maximum demand of 666 kVA. Because minimum billing demand is 85 % of contract demand, the plant pays for 680 kVA every month regardless of use.';
-  S.dist.demand = { contract:800, avg:508.91, min:98.26, max:607.11,
-    window:'9th June 2026 10:06 to 10th June 2026 01:52 (27 hrs recording)' };
-  S.dist.pcc = [
-    { name:'New Panel Power', v:430.06, i:485.38, kw:351.15, kvar:-11.14, kva:366.04, pf:0.959, vthd:6.01, ithd:22.90 },
-    { name:'Old Panel Power', v:428.40, i:229.10, kw:167.60, kvar:17.35, kva:170.39, pf:0.983, vthd:3.15, ithd:8.37 },
-    { name:'Stenter MCC', v:429.10, i:141.20, kw:98.40, kvar:22.10, kva:104.85, pf:0.938, vthd:5.80, ithd:18.40 }
-  ];
-  S.dist.motors = [
-    { sr:1, name:'Jet Dyeing Pump 1', rated:37, starter:'VFD', freq:44, v:415, i:52.1, kw:33.8, kvar:9.1, kva:37.4, pf:0.904 },
-    { sr:2, name:'Jet Dyeing Pump 2', rated:37, starter:'VFD', freq:46, v:415, i:58.4, kw:39.1, kvar:10.4, kva:41.9, pf:0.933 },
-    { sr:3, name:'Stenter Exhaust Fan', rated:22, starter:'DOL', freq:50, v:414, i:29.8, kw:16.4, kvar:8.9, kva:21.4, pf:0.766 },
-    { sr:4, name:'Boiler FD Fan', rated:15, starter:'DOL', freq:50, v:416, i:20.1, kw:11.2, kvar:6.1, kva:14.5, pf:0.772 },
-    { sr:5, name:'Cooling Tower Pump', rated:18.5, starter:'DOL', freq:50, v:415, i:24.9, kw:8.9, kvar:6.8, kva:17.9, pf:0.497 }
-  ];
-  S.dist.motorNote = 'Jet Dyeing Pump 2 runs at 105.7 % of rated capacity. Continuous operation above rating raises winding temperature, degrades insulation and shortens motor life. The cooling tower pump at 48 % load is oversized for its duty.';
-  S.dist.apfc = [
-    { stage:'Stage 1', rated:25, v:415, ir:34.2, iy:34.0, ib:33.8, remark:'Healthy' },
-    { stage:'Stage 2', rated:25, v:415, ir:33.9, iy:34.1, ib:34.0, remark:'Healthy' },
-    { stage:'Stage 8', rated:50, v:415, ir:41.2, iy:40.8, ib:22.1, remark:'Derated \u2014 one phase weak' }
-  ];
-  S.dist.apfcNote = 'Stage 8 draws markedly lower current on one phase, indicating a failed capacitor element. Effective bank capacity is therefore below nameplate.';
-  S.tr = deepMerge(S.tr, { make:'VOLTAMP', capacity:1000, primaryV:11000, secondaryV:433,
-    impedance:5.02, noLoadLoss:1.35, loadLoss:9.8, oilQty:'980 litre', year:'2016', srNo:'VT-2016-4471',
-    loading:38.2, stdEff:99.28, actualEff:99.02, vthd:5.61, ithd:24.01,
-    thermoNote:'No critical temperature was found on the transformer body, bushings or the gantry structure. Maximum recorded surface temperature was 52.4 \u00B0C against an ambient of 34 \u00B0C.',
-    panels:[{ name:'New Panel Main Line Transformer', recId:'REC-0612-A', curves:[], stats:[
-      { p:'Apparent power kVA', avg:366.04, min:307.53, max:423.75 },
-      { p:'Active power kW', avg:351.15, min:297.52, max:404.06 },
-      { p:'Power factor', avg:0.96, min:0.89, max:0.97 },
-      { p:'Voltage THD %', avg:6.01, min:5.12, max:7.55 },
-      { p:'Current THD %', avg:23.84, min:18.10, max:33.20 }
-    ]}] });
-  S.enabled.boiler = true; S.enabled.jets = true; S.enabled.pumps = true; S.enabled.lux = true;
-  S.boiler.spec = [
-    { p:'Boiler ID and make', v:'GT-6942, Thermax' },
-    { p:'Type', v:'Solid fuel fired, water tube' },
-    { p:'Rated capacity', v:'4 TPH' },
-    { p:'Design pressure', v:'10.54 kg/cm\u00B2' },
-    { p:'Fuel', v:'Indian coal' }
-  ];
-  S.boiler.direct = { steam:3450, feedTemp:82, steamEnthalpy:664, fuel:790, pressure:9.5 };
-  S.boiler.indirect = { o2:10.55, co:0, tf:185.34, ta:34, radiation:1.5 };
-  S.boiler.obs = 'Average oxygen in the flue gas was 10.55 %, corresponding to roughly 101 % excess air, well above the recommended range. CO was 0 ppm throughout, so combustion is complete and the loss is entirely in excess air.';
-  S.jets = [
-    { jetNo:'JET-01', jetType:'U Jet', insulation:'UnInsulated', capacity:300, surfaceArea:14.2, avgBodyTemp:74.5, ambientTemp:34, steamSaving:18.4, pumpEfficiency:36.2, trapStatus:'Trap Passing', heatingTimePerDay:9 },
-    { jetNo:'JET-02', jetType:'U Jet', insulation:'Insulated', capacity:300, surfaceArea:14.2, avgBodyTemp:41.2, ambientTemp:34, steamSaving:2.1, pumpEfficiency:58.4, trapStatus:'Working OK', heatingTimePerDay:9 },
-    { jetNo:'JET-03', jetType:'Long Jet', insulation:'Half Insulated', capacity:500, surfaceArea:22.6, avgBodyTemp:63.8, ambientTemp:34, steamSaving:21.7, pumpEfficiency:44.1, trapStatus:'Working OK', heatingTimePerDay:9 }
-  ];
-  S.pumps = [
-    { name:'Boiler feed pump', make:'Kirloskar', ratedKw:15, flow:11.2, head:110, motorKw:12.8, motorEff:91 },
-    { name:'Cooling tower pump', make:'CRI', ratedKw:18.5, flow:148, head:18, motorKw:8.9, motorEff:89 }
-  ];
-  S.lux = [
-    { sr:1, location:'Dyeing hall', area:420, lux:186, watt:2400, target:25 },
-    { sr:2, location:'Stenter line', area:310, lux:142, watt:2100, target:25 },
-    { sr:3, location:'Quality lab', area:48, lux:410, watt:520, target:40 },
-    { sr:4, location:'Boiler house', area:96, lux:78, watt:900, target:20 },
-    { sr:5, location:'Store passage', area:64, lux:52, watt:840, target:15 }
-  ];
-  S.ledger = [
-    { id:uid(), module:'bills', type:'electrical', status:'verified', priority:'high', actionBy:'Plant',
-      observation:'Power factor fell below 0.95 in five of twelve months, the lowest being 0.936, forfeiting the utility rebate in those months.',
-      recommendation:'Replace the failed capacitor element in APFC Stage 8 and add a relay-and-contactor set so the bank switches to hold the plant above 0.95 throughout.',
-      consumption:3287000, unit:'kWh/yr', saving:0, monetary:224530, investment:50000, co2:0 },
-    { id:uid(), module:'bills', type:'electrical', status:'verified', priority:'medium', actionBy:'Plant',
-      observation:'Highest recorded maximum demand is 666 kVA against a contract demand of 800 kVA, so the plant pays the 680 kVA minimum billing demand every month.',
-      recommendation:'Reduce contract demand from 800 kVA to 700 kVA. Minimum billing demand then becomes 595 kVA, closer to the actual load pattern, with adequate headroom retained.',
-      consumption:null, unit:'kVA', saving:0, monetary:153400, investment:0, co2:0 },
-    { id:uid(), module:'boiler', type:'thermal', status:'verified', priority:'high', actionBy:'Plant',
-      observation:'Flue gas oxygen of 10.55 % corresponds to about 101 % excess air, against the recommended 4\u20136 % O\u2082 band for this boiler.',
-      recommendation:'Tune the burner air-to-fuel ratio and install an online flue gas oxygen analyser for continuous combustion control.',
-      consumption:1138, unit:'tonne/yr', saving:30, monetary:285000, investment:100000, co2:71.4 },
-    { id:uid(), module:'jets', type:'thermal', status:'draft', priority:'high', actionBy:'Plant',
-      observation:'JET-01 is uninsulated with an average body temperature of 74.5 \u00B0C against 34 \u00B0C ambient; JET-03 is half insulated at 63.8 \u00B0C.',
-      recommendation:'Insulate the shell of JET-01 and complete the insulation on JET-03, and replace the passing steam trap on JET-01.',
-      consumption:1138, unit:'tonne/yr', saving:28, monetary:266000, investment:145000, co2:66.6 }
-  ];
-  sldBuildFromHierarchy();
-  save(); renderAll();
-  if (window.matchMedia('(max-width:1180px)').matches){
-    var t = document.querySelector('.vtab[data-view="preview"]');
-    if (t) t.click();
-  }
-});
 
 renderAll();
 

@@ -11,6 +11,7 @@ from typing import Any
 
 import base64
 import os
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
@@ -20,7 +21,7 @@ from .security import User, admin_only, current_user, hash_password, make_token,
 
 router = APIRouter()
 
-_EMAIL_RE = __import__("re").compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _iso(v: Any) -> str:
@@ -44,17 +45,30 @@ def health() -> dict:
 # ── accounts ─────────────────────────────────────────────────────────────────
 
 class _WithEmail(BaseModel):
-    """An address is checked here rather than by a library: the shape that
-    matters is 'something@something.something', and a dependency that only
-    does that is a dependency to install on the server for nothing."""
+    """Who is signing in: a KISEM FOX username, or an email address.
+
+    The team already has a username and password for FOX, and asking them to
+    learn a second pair for PostMan would get one of the two written on a
+    whiteboard. So this field takes either - a plain username like
+    `Rahulpatel`, or `someone@iitgn.ac.in` - and the only shape rule is that
+    anything containing an @ has to look like a real address, because an
+    address with a typo in it is worth catching and a username is not.
+
+    Case never matters: both are folded to lower case here, which is also
+    how they are stored, so `Rahulpatel` and `rahulpatel` are one account.
+    """
     email: str
 
     @field_validator("email")
     @classmethod
     def _email_looks_like_one(cls, v: str) -> str:
         v = (v or "").strip().lower()
-        if not _EMAIL_RE.match(v):
+        if not v:
+            raise ValueError("Who are you signing in as?")
+        if "@" in v and not _EMAIL_RE.match(v):
             raise ValueError("That does not look like an email address.")
+        if "@" not in v and not re.match(r"^[a-z0-9._-]{2,64}$", v):
+            raise ValueError("A username is letters, digits, dot, dash or underscore.")
         return v
 
 
@@ -203,8 +217,12 @@ def create_report(body: ReportIn, user: User = Depends(current_user)) -> dict:
 
 @router.get("/reports/{report_id}")
 def get_report(report_id: str, _: User = Depends(current_user), quiet: bool = False) -> dict:
-    r = db.one("SELECT id, title, company_name, financial_year, serial, report_no, state, version, updated_at, updated_by, owner_id, client_mark"
-               " FROM reports WHERE id = %s", (report_id,))
+    # updated_by resolved to a NAME, as the list does. It used to hand back
+    # the raw user id, which the editor then showed to people as "who saved
+    # this" - a row of hex where a colleague's name belongs.
+    r = db.one("SELECT r.id, r.title, r.company_name, r.financial_year, r.serial, r.report_no, r.state,"
+               " r.version, r.updated_at, (SELECT name FROM users u WHERE u.id = r.updated_by),"
+               " r.owner_id, r.client_mark FROM reports r WHERE r.id = %s", (report_id,))
     if not r:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such report.")
     # The editor re-reads a report on every reload to check whether its own

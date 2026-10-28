@@ -40,9 +40,10 @@ function gateShow(why){
   card1.appendChild(el('div','font-size:12.5px;color:var(--ink-3);margin-bottom:14px;',
     'Your reports, the team’s reports and every file the field apps have sent.'));
 
-  var em = el('input'); em.type = 'email'; em.placeholder = 'you@iitgn.ac.in'; em.autocomplete = 'username';
+  /* Plain text, not type=email: these are KISEM FOX usernames. */
+  var em = el('input'); em.type = 'text'; em.placeholder = 'your KISEM FOX username'; em.autocomplete = 'username';
   var pw = el('input'); pw.type = 'password'; pw.placeholder = 'Password'; pw.autocomplete = 'current-password';
-  card1.appendChild(labelled('Email', em));
+  card1.appendChild(labelled('Username', em));
   card1.appendChild(labelled('Password', pw));
   var msg = el('p','margin-top:10px;'); msg.className = 'callout'; msg.hidden = true;
   /* Why the door is being shown. A session that ran out says so, rather
@@ -54,7 +55,7 @@ function gateShow(why){
     msg.textContent = why + (cloudAnyWork() ? ' Your report is still here — signing in puts it back on the server.' : '');
   }
   var go = btn('Sign in', function(){
-    if (!em.value.trim() || !pw.value){ msg.hidden = false; msg.className = 'callout bad'; msg.textContent = 'Email and password, please.'; return; }
+    if (!em.value.trim() || !pw.value){ msg.hidden = false; msg.className = 'callout bad'; msg.textContent = 'Username and password, please.'; return; }
     msg.hidden = false; msg.className = 'callout'; msg.textContent = 'Signing in…';
     go.disabled = true;
     cloudLogin(em.value.trim(), pw.value).then(function(){
@@ -84,7 +85,7 @@ function gateShow(why){
   box.appendChild(srv);
 
   box.appendChild(el('p','margin-top:18px;font-size:12px;color:var(--ink-3);',
-    'One account for the team, made when the server was set up. Working offline keeps everything in this browser — you can sign in later and push the report up.'));
+    'Sign in with the same username and password you use in KISEM FOX — so that every save carries your name, and nobody has two sets to remember. Working offline keeps everything in this browser; you can sign in later and push the report up.'));
   host.appendChild(box);
   setTimeout(function(){ em.focus(); }, 60);
 }

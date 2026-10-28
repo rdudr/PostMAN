@@ -1,0 +1,8 @@
+[
+  { "username": "Abhay",      "name": "Abhay",       "role": "engineer", "password": "" },
+  { "username": "Rahulpatel", "name": "Rahul Patel", "role": "engineer", "password": "" },
+  { "username": "DhruvIT",    "name": "Dhruv",       "role": "engineer", "password": "" },
+  { "username": "Sagar",      "name": "Sagar",       "role": "engineer", "password": "" },
+  { "username": "Rishabh",    "name": "Rishabh",     "role": "admin",    "password": "" },
+  { "username": "Faizan",     "name": "Faizan",      "role": "engineer", "password": "" }
+]

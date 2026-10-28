@@ -40,6 +40,13 @@ save behind it. The server, its API and how to put it on Oracle Cloud are in
    before anything else. This is the one the other three lean on: a browser
    being closed can never be relied upon, so nothing depends on it alone.
 
+**Everybody signs in as themselves, with their KISEM FOX username and
+password.** No second pair to remember, and the activity trail names the
+person who did each thing rather than a shared account. While a report is
+open, PostMan watches for a colleague saving it and says so in the strip —
+"Rahul Patel saved v2", with one button to load their copy — long before
+anybody can type themselves into a clash.
+
 **You stay signed in.** A reload opens straight back onto the work — no
 password, no spinner — and the session is checked against the server a
 moment later. A server that cannot be reached leaves you signed in, because

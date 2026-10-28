@@ -38,3 +38,7 @@ __pycache__/
 
 # A local run of the API keeps its data here when DATA_DIR points at the repo.
 server/_devdata/
+
+# The team list with real passwords. The usernames are in
+# team.example.json; the passwords stay on the server.
+server/team.json

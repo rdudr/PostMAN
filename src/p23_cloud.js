@@ -98,8 +98,9 @@ function cloudLogin(email, password){
     .then(function(r){
       var c = cloudState();
       c.token = r.token; c.user = r.user; c.tokenAt = Date.now();
-      c.lastError = ''; CLOUD_FAILS = 0; CLOUD_CONFLICT = '';
+      c.lastError = ''; CLOUD_FAILS = 0; CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = '';
       saveNow();
+      cloudWatchStart();
       /* Whatever this browser holds and the server does not, goes up now. */
       cloudPush('signed in');
       return r.user;
@@ -117,6 +118,7 @@ function cloudEndSession(why){
   c.lastError = why || '';
   c.offlineChosen = false;             /* so the door asks again */
   clearTimeout(CLOUD_T); CLOUD_T = null;
+  clearInterval(CLOUD_WATCH); CLOUD_WATCH = null; CLOUD_THEIRS = null;
   saveNow();
   if (typeof gateShow === 'function') gateShow(why || ''); else renderAll();
 }
@@ -159,6 +161,7 @@ function cloudResume(){
     return cloudRenewIfStale();
   }).then(function(){
     paintCloudStrip();
+    cloudWatchStart();                 /* and keep an eye on what the others do */
     return cloudReconcile();           /* rule 4: catch the server up, first thing */
   }).then(function(){
     return true;
@@ -216,8 +219,10 @@ function cloudReconcile(){
     }
 
     /* Somebody else's save is the newest one. Do not touch it. */
-    CLOUD_CONFLICT = 'This report has moved on since you last had it — the server is on version ' +
-      r.version + ' and you were on ' + c.version + '.';
+    CLOUD_CONFLICT_WHO = r.updated_by || '';
+    CLOUD_CONFLICT = (r.updated_by ? r.updated_by + ' has saved this report since you last had it'
+                                   : 'This report has moved on since you last had it') +
+      ' — the server is on version ' + r.version + ', you were on ' + c.version + '.';
     clearTimeout(CLOUD_T); CLOUD_T = null;
     paintCloudStrip();
     return false;
@@ -279,7 +284,7 @@ function cloudNewReport(sess){
               offlineChosen:!!sess.offlineChosen,
               reportId:'', version:0, lastSaved:'', lastError:'', dirty:false };
   CLOUD_SIG = '';
-  CLOUD_CONFLICT = ''; CLOUD_FAILS = 0;
+  CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = ''; CLOUD_FAILS = 0;
   clearTimeout(CLOUD_T); CLOUD_T = null;
 }
 
@@ -328,6 +333,7 @@ function cloudSave(note){
   }
   return p.then(function(r){
     CLOUD_SIG = JSON.stringify(body.state);
+    if (CLOUD_THEIRS && CLOUD_THEIRS.version <= r.version) CLOUD_THEIRS = null;
     c.reportId = r.id; c.version = r.version; c.dirty = false; c.lastError = '';
     c.lastSaved = new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
     save(); paintCloudStrip();
@@ -341,7 +347,7 @@ function cloudSave(note){
 function cloudSaveAsCopy(){
   var c = cloudState();
   c.reportId = ''; c.version = 0;
-  CLOUD_CONFLICT = ''; CLOUD_FAILS = 0;
+  CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = ''; CLOUD_FAILS = 0;
   return cloudSave('copy kept after a clash');
 }
 function cloudOpen(id){
@@ -349,12 +355,13 @@ function cloudOpen(id){
     var keep = cloudState();
     var cloud = { server:keep.server, token:keep.token, user:keep.user, tokenAt:keep.tokenAt,
                   autosave:keep.autosave, offlineChosen:keep.offlineChosen,
-                  reportId:r.id, version:r.version, lastSaved:'opened', lastError:'', dirty:false };
+                  reportId:r.id, version:r.version, lastSaved:'', lastError:'', dirty:false };
     S = deepMerge(blankState(), r.state || {});
     S.cloud = cloud;
     if (typeof migrateState === 'function') migrateState();
     CLOUD_SIG = cloudSig();      /* just arrived from the server - nothing to push */
-    CLOUD_CONFLICT = ''; CLOUD_FAILS = 0;
+    CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = ''; CLOUD_FAILS = 0;
+    CLOUD_THEIRS = null;
     clearTimeout(CLOUD_T); CLOUD_T = null;
     saveNow(); renderAll();
     return r;
@@ -376,6 +383,7 @@ var CLOUD_BUSY = false;        /* one at a time, so two saves cannot race */
 var CLOUD_AGAIN = false;       /* something changed while one was in flight */
 var CLOUD_FAILS = 0;          /* consecutive failures, for the backoff */
 var CLOUD_CONFLICT = '';       /* set when the server says somebody else saved */
+var CLOUD_CONFLICT_WHO = '';   /* and who it was, when the server tells us */
 var CLOUD_DELAY = 2500;        /* how far behind the server runs while typing */
 var CLOUD_FLUSHED = '';        /* the content already sent on the way out */
 
@@ -423,9 +431,12 @@ function cloudPush(note, force){
   }).catch(function(e){
     if (e && e.status === 409){
       /* Two people, one report. Retrying would fail for ever and bury the
-         choice, so autosaving stops here until somebody decides. */
+         choice, so autosaving stops here until somebody decides. Ask who it
+         was, because "Rahul has saved this report" is something you can act
+         on and "there was a conflict" is not. */
       CLOUD_CONFLICT = e.message;
       clearTimeout(CLOUD_T); CLOUD_T = null;
+      cloudWhoSaved();
     } else if (signedIn()){
       CLOUD_FAILS++;
       cloudArm(cloudBackoff());        /* rule 2: try again by itself */
@@ -520,29 +531,41 @@ function paintCloudStrip(){
   var line, tone = '';
 
   if (CLOUD_CONFLICT){
-    line = 'somebody else has saved this report';
+    line = (CLOUD_CONFLICT_WHO ? CLOUD_CONFLICT_WHO + ' has saved this report' : 'somebody else has saved this report');
     tone = 'var(--bad)';
   } else if (!c.reportId){
     line = 'not on the server yet';
-  } else if (CLOUD_BUSY){
+  } else if (CLOUD_BUSY || c.dirty){
     line = 'saving…';
   } else if (c.lastError){
     line = CLOUD_FAILS ? 'not saved — trying again' : 'not saved — ' + c.lastError;
     tone = 'var(--bad)';
-  } else if (c.dirty){
-    line = 'saving…';
   } else {
-    line = 'saved ' + (c.lastSaved || '') + ' · v' + c.version;
+    /* "saved 15:04 · v13" once something has been saved from here, and
+       "up to date · v13" when the report simply arrived that way. It used
+       to print the word "opened" where the time goes. */
+    line = (c.lastSaved ? 'saved ' + c.lastSaved : 'up to date') + ' · v' + c.version;
   }
   var label = el('span','', who + ' · ' + line);
   if (tone) label.style.color = tone;
   host.appendChild(label);
 
-  if (CLOUD_CONFLICT){
-    host.appendChild(btn('What now?', function(){ S.active = 'cloud'; save(); renderAll(); }, 'sm primary'));
-    return;
+  /* A colleague has saved while this was open. Not an error, not a clash -
+     just news, with the one thing you would want to do about it. */
+  if (CLOUD_THEIRS && !CLOUD_CONFLICT){
+    var n = el('span','color:var(--accent);',
+      ' · ' + (CLOUD_THEIRS.who || 'somebody') + ' saved v' + CLOUD_THEIRS.version);
+    host.appendChild(n);
+    host.appendChild(btn('Load theirs', cloudTakeNewer, 'sm'));
   }
-  if (c.lastError){
+
+  /* These two never go away. A clash used to replace them with a single
+     "What now?", which took Save and My reports off the screen exactly when
+     somebody needed to get out of the report they were stuck in. A clash is
+     a notice, not a trap. */
+  if (CLOUD_CONFLICT){
+    host.appendChild(btn('Sort it out', function(){ S.active = 'cloud'; save(); renderAll(); }, 'sm primary'));
+  } else if (c.lastError){
     host.appendChild(btn('Try now', function(){ cloudRetryNow(); }, 'sm primary'));
   } else {
     host.appendChild(btn(c.reportId ? 'Save now' : 'Save to the server', function(){
@@ -552,14 +575,70 @@ function paintCloudStrip(){
   host.appendChild(btn('My reports', function(){ S.active = 'cloud'; save(); renderAll(); }, 'sm'));
 }
 
+/* ------------------------------------------------------------------
+   WATCHING FOR SOMEBODY ELSE'S WORK
+
+   Two people on one report used to find out about each other only by
+   colliding: the first to save won, the second got a clash out of nowhere.
+   So while a report is open, ask the server every half minute whether its
+   version has moved. If it has and WE did not move it, say so quietly -
+   with the colleague's name and one button to take their copy - long
+   before anybody has typed themselves into a conflict.
+
+   It is a HEAD-weight question on a 25 KB document, once every 30s, per
+   open editor. On a team of six that is nothing.
+   ------------------------------------------------------------------ */
+var CLOUD_WATCH = null;
+var CLOUD_THEIRS = null;       /* {version, who, at} seen on the server */
+var CLOUD_WATCH_MS = 30000;
+
+function cloudWatchStart(){
+  clearInterval(CLOUD_WATCH);
+  CLOUD_WATCH = setInterval(cloudWatchTick, CLOUD_WATCH_MS);
+}
+function cloudWatchTick(){
+  var c = cloudState();
+  if (!signedIn() || !c.reportId || CLOUD_BUSY || CLOUD_CONFLICT) return;
+  if (document.visibilityState === 'hidden') return;   /* nobody is looking */
+  cloudFetch('/api/reports?company=' + encodeURIComponent(c.company_name || (S.company && S.company.name) || ''))
+    .then(function(rows){
+      var mine = null, i;
+      for (i = 0; i < rows.length; i++) if (rows[i].id === c.reportId) { mine = rows[i]; break; }
+      if (!mine) return;
+      if (mine.version > c.version){
+        CLOUD_THEIRS = { version:mine.version, who:mine.updated_by || '', at:mine.updated_at || '' };
+      } else {
+        CLOUD_THEIRS = null;
+      }
+      paintCloudStrip();
+    }).catch(function(){ /* the strip already says when the server is away */ });
+}
+/* Taking what a colleague saved, when the watcher has offered it. */
+function cloudTakeNewer(){
+  var c = cloudState();
+  if (cloudBehind() && !confirm('Load the newer copy?\n\nYou have changes here that are not on the server yet, and they would be replaced.')) return;
+  CLOUD_THEIRS = null;
+  return cloudOpen(c.reportId).catch(function(e){ alert(e.message); });
+}
+
+/* Who made the save we just lost a race to. Best effort and silent: the
+   notice is already on screen; this only puts a name on it. */
+function cloudWhoSaved(){
+  var c = cloudState();
+  if (!c.reportId) return;
+  cloudFetch('/api/reports/' + encodeURIComponent(c.reportId) + '?quiet=true')
+    .then(function(r){ CLOUD_CONFLICT_WHO = r.updated_by || ''; paintCloudStrip(); })
+    .catch(function(){});
+}
+
 /* ---- the two ways out of a clash, in one place ---------------------- */
 function cloudTakeTheirs(){
   var c = cloudState();
-  CLOUD_CONFLICT = '';
+  CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = '';
   return cloudOpen(c.reportId);
 }
 function cloudKeepMine(){
-  CLOUD_CONFLICT = '';
+  CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = '';
   return cloudSaveAsCopy();
 }
 
@@ -580,9 +659,9 @@ FORMS.cloud = function(w){
 
   if (!signedIn()){
     var form = el('div','display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px;');
-    var em = el('input'); em.type = 'email'; em.placeholder = 'you@iitgn.ac.in'; em.autocomplete = 'username';
+    var em = el('input'); em.type = 'text'; em.placeholder = 'your KISEM FOX username'; em.autocomplete = 'username';
     var pw = el('input'); pw.type = 'password'; pw.placeholder = 'password'; pw.autocomplete = 'current-password';
-    form.appendChild(labelled('Email', em));
+    form.appendChild(labelled('Username', em));
     form.appendChild(labelled('Password', pw));
     c1.appendChild(form);
     var msg = el('p',''); msg.className = 'callout'; msg.hidden = true;
@@ -595,7 +674,7 @@ FORMS.cloud = function(w){
     c1.appendChild(btn('Sign in', go, 'primary'));
     c1.appendChild(msg);
     c1.appendChild(el('p','margin-top:8px;font-size:12px;color:var(--ink-3);',
-      'No account? An administrator makes one for you — accounts are not self-service, because a report carries a client’s measurements.'));
+      'The same username and password as KISEM FOX. No account? An administrator makes one — accounts are not self-service, because a report carries a client’s measurements.'));
     w.appendChild(c1);
     return;
   }
@@ -639,8 +718,9 @@ FORMS.cloud = function(w){
     }));
     cf.appendChild(cfb);
     c2.appendChild(cf);
-    w.appendChild(c2);
-    return;        /* one decision at a time */
+    /* The rest of this screen still draws. It used to stop here, which meant
+       a clash also took away the list of reports - so the one screen that
+       could get you out of the stuck report was the screen that hid it. */
   }
 
   if (c.lastError) c2.appendChild(el('p','', c.lastError)).className = 'callout bad';

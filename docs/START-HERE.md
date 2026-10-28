@@ -85,26 +85,29 @@ stranger can reach that is worth guessing at.
 **After this step PostMan is usable by the whole team**, from
 `https://postman-ten-beta.vercel.app`, with the server address already built in.
 
-## 3. There is nothing to do here
+## 3. Give the team their accounts  *(2 minutes, on the server)*
 
-One login is all this needs, and step 1 made it:
+Everybody already has a username and password for **KISEM FOX**. PostMan
+uses the same ones, so there is no second pair to remember and every save in
+the activity trail carries the person's own name.
 
+```powershell
+copy team.example.json team.json
+notepad team.json          # fill in the passwords the team uses in FOX
+.\.venv\Scripts\python scripts\seed_team.py
 ```
-iea@iitgn.ac.in
+
+`team.example.json` already lists the six usernames; you only add the
+passwords. Running the script again later updates a password or adds a
+person, and never touches anybody's reports.
+
+```powershell
+.\.venv\Scripts\python scripts\seed_team.py --list     # who exists
 ```
 
-That account is an admin, and the whole team signs in with it. Nothing in
-PostMan asks for a second account.
-
-Two consequences, so neither is a surprise later. The activity trail will
-show the same name against every line, so it tells you *when* something was
-opened or saved but not by whom. And a shared password is only as private as
-the people who know it — change it from **Server & my reports** whenever
-somebody leaves, which signs nobody else out.
-
-If the team ever does want a line per person, the server already does it: an
-admin adds accounts on that same screen, and the trail starts naming them.
-That is an option, not a step.
+**`team.json` must never be committed.** It is in `.gitignore`, and this
+repository is public. Anybody can change their own password from **Server &
+my reports** inside PostMan once they are in.
 
 ## 4. Back up the folder  *(10 minutes, once)*
 
