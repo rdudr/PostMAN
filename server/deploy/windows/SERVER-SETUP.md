@@ -307,10 +307,46 @@ or two as well. A desktop under a table is not a backup.
 |---|---|
 | Is it alive? | `curl http://127.0.0.1:8800/api/health` on the server, or `https://eass.eassiitgn.page/api/health` from anywhere |
 | Restart it | `Stop-ScheduledTask EASS-API; Start-ScheduledTask EASS-API` |
-| Update the code | `cd C:\Users\Admin\Desktop\PostMan; git pull; Stop-ScheduledTask EASS-API; Start-ScheduledTask EASS-API` |
+| Update the code, if this is a git clone | `cd C:\Users\Admin\Desktop\PostMan; git pull; Stop-ScheduledTask EASS-API; Start-ScheduledTask EASS-API` |
+| Update the code, if it is a copied folder | See **Updating a server that is not a git clone** below. `git` is not installed on DESKTOP-UH3VCQ5 and the folder there is a copy, so `git pull` cannot work on it |
 | See an error | Run `.\deploy\windows\run-eass-api.ps1` by hand in a window. The task swallows the message; a window shows it |
 | Poke the API by hand | `https://eass.eassiitgn.page/api/docs` in a browser |
 | After any API change | `.\.venv\Scripts\python scripts\smoke.py` — 50 checks against a throwaway database, and it says in words what broke |
+
+## Updating a server that is not a git clone
+
+DESKTOP-UH3VCQ5 was set up by copying the folder (step 2b), and `git` is not
+installed on it, so `git pull` has nothing to pull. Copy the changed files
+over instead, from a machine that does have the repository:
+
+```bash
+cd "<the repo>/server"
+scp app/*.py         ssh.eassiitgn.page:"C:/Users/Admin/Desktop/PostMan/server/app/"
+scp scripts/*.py     ssh.eassiitgn.page:"C:/Users/Admin/Desktop/PostMan/server/scripts/"
+scp deploy/windows/* ssh.eassiitgn.page:"C:/Users/Admin/Desktop/PostMan/server/deploy/windows/"
+scp requirements.txt .env.example team.example.json README.md ssh.eassiitgn.page:"C:/Users/Admin/Desktop/PostMan/server/"
+```
+
+**Never copy `.env` or the `KISEM Project` folder across.** That `.env`
+holds the server's own `SESSION_SECRET`, and replacing it signs every single
+person out; replacing the data folder is self-evidently worse. Back the code
+up first - it is three folders:
+
+```powershell
+$d = 'C:\Users\Admin\Desktop\PostMan\_backup_' + (Get-Date -f yyyyMMdd-HHmm)
+New-Item -ItemType Directory -Force $d | Out-Null
+'app','scripts','deploy' | ForEach-Object { Copy-Item "C:\Users\Admin\Desktop\PostMan\server\$_" $d -Recurse -Force }
+```
+
+Then restart and check:
+
+```powershell
+Stop-ScheduledTask EASS-API; Start-Sleep 3; Start-ScheduledTask EASS-API; Start-Sleep 10
+(Invoke-WebRequest http://127.0.0.1:8800/api/health -UseBasicParsing).Content
+```
+
+Installing git on that machine would make all of this one command, and is
+worth doing next time somebody is sitting at it.
 
 ## When something is wrong
 
@@ -323,6 +359,7 @@ or two as well. A desktop under a table is not a backup.
 | "Cannot reach the server" in PostMan while `curl` is fine | `ALLOWED_ORIGINS` in `.env` does not list the exact PostMan address, scheme and all. The browser refuses the call and the API never sees it |
 | "Cannot reach the server" with `http://127.0.0.1:8800` in the box | an `https://` page cannot call a plain-`http` local address. Use the tunnel address, or serve PostMan locally too |
 | `SESSION_SECRET is not set` on startup | `.env` is not beside `app\`, or the line is empty |
+| `403` from the API, but a browser works fine | Cloudflare refuses unknown user agents. A script calling the API - a field app posting to `/api/ingest`, a `curl` in a scheduled task - must send an ordinary browser `User-Agent` or it is blocked before it reaches the server |
 | Everybody signed out at once | `SESSION_SECRET` changed. That is also how you sign everyone out on purpose |
 | Nothing works after a reboot | `Get-ScheduledTask EASS-API` — the trigger must be **At startup**, with "run whether user is logged on or not" |
 | The machine was simply off | BIOS "Restore on AC Power Loss" is the only fix for a power cut, and `harden-server.ps1` cannot set it for you |
