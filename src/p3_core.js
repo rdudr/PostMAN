@@ -240,15 +240,33 @@ function defaultInstruments(){
 
 var S = blankState();
 var KEY = 'postman.report.v2';
+/* WHO YOU ARE IS KEPT APART FROM WHAT YOU ARE WRITING.
+
+   The sign-in used to live inside the report document, so it was written to
+   storage by the same call. That couples two things that have no business
+   being coupled: the moment a report grew past what the browser would store
+   - a few dozen site photographs will do it - the write failed, the failure
+   was swallowed, and the NEXT RELOAD HAD NO SESSION. From the outside that
+   looks like being logged out at random by opening the page again.
+
+   The session is a few hundred bytes. On its own key it is written in its
+   own call, and no report, however large, can take it down. */
+var SESS_KEY = 'postman.session.v1';
 
 function loadState(){
   try {
     var raw = localStorage.getItem(KEY);
-    if (!raw) return;
-    var parsed = JSON.parse(raw);
-    S = deepMerge(blankState(), parsed);
-    migrateState();
+    if (raw){
+      S = deepMerge(blankState(), JSON.parse(raw));
+      migrateState();
+    }
   } catch (e) { /* private window or blocked storage - start clean */ }
+  /* The session afterwards and separately, so a report that will not parse
+     or will not fit still cannot sign anybody out. */
+  try {
+    var sess = localStorage.getItem(SESS_KEY);
+    if (sess) S.cloud = deepMerge(S.cloud || {}, JSON.parse(sess));
+  } catch (e) { /* no session kept; the door will ask */ }
 }
 /* Drafts carry the defaults they were saved under. A default that CHANGES
    therefore needs a one-time nudge, or a report started last week keeps
@@ -278,10 +296,34 @@ function deepMerge(base, over){
   return out;
 }
 var saveT = null;
+/* True when the browser refused to keep the report. It used to be swallowed
+   in silence, which meant a report too big for storage stopped being kept
+   and nobody was told until the tab closed. */
+var LOCAL_SAVE_FAILED = '';
+
 function saveNow(){
   clearTimeout(saveT); saveT = null;
-  try { localStorage.setItem(KEY, JSON.stringify(S)); }
-  catch (e) { /* quota or blocked - the draft still lives in memory */ }
+  /* The session first, and in its own call: it is tiny, it almost never
+     fails, and it must not share the report's fate. */
+  try {
+    if (S.cloud) localStorage.setItem(SESS_KEY, JSON.stringify(S.cloud));
+  } catch (e) { /* nothing useful to do; the server will ask again */ }
+  try {
+    localStorage.setItem(KEY, JSON.stringify(S));
+    if (LOCAL_SAVE_FAILED){
+      LOCAL_SAVE_FAILED = '';
+      if (typeof paintCloudStrip === 'function') paintCloudStrip();
+    }
+  } catch (e) {
+    /* Out of room, or storage is blocked. The draft is still in memory and
+       still going to the server, so this is a warning and not a disaster -
+       but it has to be said out loud, because the one thing that must never
+       happen is work quietly not being kept. */
+    LOCAL_SAVE_FAILED = (e && e.name === 'QuotaExceededError')
+      ? 'this browser is full — the report is being kept on the server, not here'
+      : 'this browser will not store the report — it is being kept on the server';
+    if (typeof paintCloudStrip === 'function') paintCloudStrip();
+  }
 }
 function save(){
   clearTimeout(saveT);

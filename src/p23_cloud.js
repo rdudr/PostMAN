@@ -518,6 +518,14 @@ function paintCloudStrip(){
   clear(host);
   var c = cloudState();
 
+  /* If the browser has stopped keeping the report, that outranks everything
+     else on this line - signed in or not. */
+  if (typeof LOCAL_SAVE_FAILED !== 'undefined' && LOCAL_SAVE_FAILED){
+    var warn = el('span','', 'Careful — ' + LOCAL_SAVE_FAILED);
+    warn.style.color = 'var(--bad)';
+    host.appendChild(warn);
+  }
+
   if (!signedIn()){
     host.appendChild(el('span','', 'Working in this browser only'));
     host.appendChild(btn('Sign in', function(){
