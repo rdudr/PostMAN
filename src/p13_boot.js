@@ -46,17 +46,13 @@ syncNavToggle();
 
 renderAll();
 
-/* THE DOOR, OR STRAIGHT THROUGH IT.
+/* THE DOOR, EVERY TIME.
 
-   A sign-in already in this browser is believed at once: the app opens on
-   the work, not on a password box, and not on a spinner either. The token
-   is then checked against the server in the background, which is where a
-   stale one is caught and where anything this browser holds and the server
-   does not gets pushed up.
+   Opening the page asks who you are - a reload, a new tab, a machine
+   somebody else used yesterday. No sign-in is carried over from a previous
+   sitting, so there is nothing to believe and nothing to check: the door
+   simply opens, with the draft waiting behind it. Signing in is what then
+   catches the server up on anything this browser holds and it does not.
 
-   No session, and no earlier "Work offline": the door. */
-if (typeof signedIn === 'function' && signedIn()){
-  cloudResume();
-} else if (typeof gateNeeded === 'function' && gateNeeded()){
-  gateShow();
-}
+   "Work offline" is still one click, and still only for this sitting. */
+if (typeof gateNeeded === 'function' && gateNeeded()) gateShow();

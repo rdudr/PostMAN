@@ -550,18 +550,23 @@ function defaultInstruments(){
 
 var S = blankState();
 var KEY = 'postman.report.v2';
-/* WHO YOU ARE IS KEPT APART FROM WHAT YOU ARE WRITING.
+/* A SIGN-IN LASTS AS LONG AS THE PAGE IS OPEN, AND NOT ONE MOMENT LONGER.
 
-   The sign-in used to live inside the report document, so it was written to
-   storage by the same call. That couples two things that have no business
-   being coupled: the moment a report grew past what the browser would store
-   - a few dozen site photographs will do it - the write failed, the failure
-   was swallowed, and the NEXT RELOAD HAD NO SESSION. From the outside that
-   looks like being logged out at random by opening the page again.
+   Opening PostMan asks who you are. Every time, on every machine: a reload,
+   a new tab, a laptop picked up the next morning. No token is written to
+   storage, so there is nothing on a shared plant computer for the next
+   person to walk into, and no way for two people to be the same person
+   because one of them borrowed a browser.
 
-   The session is a few hundred bytes. On its own key it is written in its
-   own call, and no report, however large, can take it down. */
+   What IS kept is the work: the draft, and which report on the server it
+   belongs to. Signing in therefore carries on with the same report rather
+   than starting a duplicate of it - the password box is a door, not a
+   reset. The old key is removed on the way past, because a build before
+   this one did keep the token there. */
 var SESS_KEY = 'postman.session.v1';
+/* Of the cloud block, only these survive a reload. Everything else -
+   token, user, tokenAt, offlineChosen - is this sitting only. */
+var SESSION_KEPT = { server:1, reportId:1, version:1, lastMark:1, autosave:1 };
 
 function loadState(){
   try {
@@ -571,12 +576,25 @@ function loadState(){
       migrateState();
     }
   } catch (e) { /* private window or blocked storage - start clean */ }
-  /* The session afterwards and separately, so a report that will not parse
-     or will not fit still cannot sign anybody out. */
-  try {
-    var sess = localStorage.getItem(SESS_KEY);
-    if (sess) S.cloud = deepMerge(S.cloud || {}, JSON.parse(sess));
-  } catch (e) { /* no session kept; the door will ask */ }
+  /* Nobody is signed in by opening a page. A draft written by an older
+     build carries a token inside it, and that one goes too. */
+  if (S.cloud){
+    S.cloud.token = ''; S.cloud.user = null; S.cloud.tokenAt = 0;
+    S.cloud.offlineChosen = false;
+  }
+  try { localStorage.removeItem(SESS_KEY); } catch (e) { }
+}
+
+/* The draft as it goes into storage: the cloud block thinned down to the
+   few fields that are allowed to outlive the page. The swap is put back
+   before anything else can see it, so the running app is untouched. */
+function stateText(){
+  var c = S.cloud;
+  if (!c) return JSON.stringify(S);
+  var thin = {}, k;
+  for (k in c) if (SESSION_KEPT[k]) thin[k] = c[k];
+  S.cloud = thin;
+  try { return JSON.stringify(S); } finally { S.cloud = c; }
 }
 /* Drafts carry the defaults they were saved under. A default that CHANGES
    therefore needs a one-time nudge, or a report started last week keeps
@@ -613,13 +631,8 @@ var LOCAL_SAVE_FAILED = '';
 
 function saveNow(){
   clearTimeout(saveT); saveT = null;
-  /* The session first, and in its own call: it is tiny, it almost never
-     fails, and it must not share the report's fate. */
   try {
-    if (S.cloud) localStorage.setItem(SESS_KEY, JSON.stringify(S.cloud));
-  } catch (e) { /* nothing useful to do; the server will ask again */ }
-  try {
-    localStorage.setItem(KEY, JSON.stringify(S));
+    localStorage.setItem(KEY, stateText());
     if (LOCAL_SAVE_FAILED){
       LOCAL_SAVE_FAILED = '';
       if (typeof paintCloudStrip === 'function') paintCloudStrip();
@@ -9627,11 +9640,14 @@ function inboxCard(){
         lean on: a browser being closed cannot be relied upon, so nothing
         depends on it alone.
 
-   And the session: a stored sign-in is believed at once and checked against
-   the server a moment later. A server that cannot be reached leaves you
-   signed in - a blip in a plant basement is not a reason to log somebody
-   out - while a definite "that token is no longer valid" returns you to the
-   door, with the reason given and the draft untouched.
+   And the session: opening the page asks who you are, every time and on
+   every machine. Nothing is carried over from the last sitting, which is
+   why rule 4 happens at SIGN-IN rather than at boot - the moment there is
+   a token again is the moment the server can be caught up. A server that
+   cannot be reached during the sitting leaves you signed in, because a
+   blip in a plant basement is not a reason to log somebody out; only a
+   definite "that token is no longer valid" returns you to the door, with
+   the reason given and the draft untouched.
    =================================================================== */
 
 var EASS_DEFAULT = 'https://eass.eassiitgn.page';
@@ -9727,8 +9743,12 @@ function cloudLogin(email, password){
       c.lastError = ''; CLOUD_FAILS = 0; CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = '';
       saveNow();
       cloudWatchStart();
-      /* Whatever this browser holds and the server does not, goes up now. */
-      cloudPush('signed in');
+      /* Rule 4, and the first thing done with a new token: whatever this
+         browser holds and the server does not goes up now. Reconcile and
+         not a plain push, because the draft may well belong to a report
+         the server already has - including the push that went out as the
+         page closed last night, which this browser never saw land. */
+      cloudReconcile();
       return r.user;
     });
 }
@@ -9768,40 +9788,6 @@ function cloudLogout(){
    draft that is really just an empty form. */
 function cloudAnyWork(){
   return !!((S.company && S.company.name) || (S.bills && S.bills.length) || (S.ledger && S.ledger.length));
-}
-
-/* ------------------------------------------------------------------
-   PICKING UP WHERE YOU LEFT OFF
-
-   Run once at boot when a token is already in this browser. The token is
-   BELIEVED immediately - the app opens signed in, with no spinner and no
-   flash of the sign-in page - and checked against the server a moment
-   later, which is when a stale one is caught.
-   ------------------------------------------------------------------ */
-function cloudResume(){
-  var c = cloudState();
-  if (!signedIn()) return Promise.resolve(false);
-  return cloudFetch('/api/auth/me').then(function(u){
-    c.user = u;                        /* a renamed account shows its new name */
-    c.lastError = '';
-    return cloudRenewIfStale();
-  }).then(function(){
-    paintCloudStrip();
-    cloudWatchStart();                 /* and keep an eye on what the others do */
-    return cloudReconcile();           /* rule 4: catch the server up, first thing */
-  }).then(function(){
-    return true;
-  }).catch(function(e){
-    /* A 401 has already shown the door, through cloudEndSession. Anything
-       else is the server being unreachable, which is NOT a reason to sign
-       anybody out: stay in, say so in the strip, and look again in a minute. */
-    if (signedIn()){
-      c.lastError = e.message;
-      paintCloudStrip();
-      setTimeout(cloudResume, 60000);
-    }
-    return false;
-  });
 }
 
 /* ---- rule 4: settling up with the server on the way in ---------------
@@ -9855,8 +9841,10 @@ function cloudReconcile(){
   });
 }
 
-/* A token half-way through its life is replaced, so a long day on site does
-   not end in a sign-out nobody asked for. */
+/* A token half-way through its life is replaced, so a tab left open
+   through a long day on site does not end in a sign-out nobody asked for.
+   Called by the watcher, which is the one thing already ticking while
+   somebody works. */
 function cloudRenewIfStale(){
   var c = cloudState();
   if (!signedIn()) return Promise.resolve(false);
@@ -10232,7 +10220,9 @@ function cloudWatchStart(){
 }
 function cloudWatchTick(){
   var c = cloudState();
-  if (!signedIn() || !c.reportId || CLOUD_BUSY || CLOUD_CONFLICT) return;
+  if (!signedIn()) return;
+  cloudRenewIfStale();                 /* keeps a long sitting alive */
+  if (!c.reportId || CLOUD_BUSY || CLOUD_CONFLICT) return;
   if (document.visibilityState === 'hidden') return;   /* nobody is looking */
   cloudFetch('/api/reports?company=' + encodeURIComponent(c.company_name || (S.company && S.company.name) || ''))
     .then(function(rows){
@@ -12978,19 +12968,15 @@ syncNavToggle();
 
 renderAll();
 
-/* THE DOOR, OR STRAIGHT THROUGH IT.
+/* THE DOOR, EVERY TIME.
 
-   A sign-in already in this browser is believed at once: the app opens on
-   the work, not on a password box, and not on a spinner either. The token
-   is then checked against the server in the background, which is where a
-   stale one is caught and where anything this browser holds and the server
-   does not gets pushed up.
+   Opening the page asks who you are - a reload, a new tab, a machine
+   somebody else used yesterday. No sign-in is carried over from a previous
+   sitting, so there is nothing to believe and nothing to check: the door
+   simply opens, with the draft waiting behind it. Signing in is what then
+   catches the server up on anything this browser holds and it does not.
 
-   No session, and no earlier "Work offline": the door. */
-if (typeof signedIn === 'function' && signedIn()){
-  cloudResume();
-} else if (typeof gateNeeded === 'function' && gateNeeded()){
-  gateShow();
-}
+   "Work offline" is still one click, and still only for this sitting. */
+if (typeof gateNeeded === 'function' && gateNeeded()) gateShow();
 
 </script>

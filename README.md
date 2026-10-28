@@ -47,13 +47,18 @@ open, PostMan watches for a colleague saving it and says so in the strip —
 "Rahul Patel saved v2", with one button to load their copy — long before
 anybody can type themselves into a clash.
 
-**You stay signed in.** A reload opens straight back onto the work — no
-password, no spinner — and the session is checked against the server a
-moment later. A server that cannot be reached leaves you signed in, because
-a blip in a plant basement is not a reason to log anybody out; only a
+**Opening PostMan asks who you are — every time, on every machine.** A
+reload, a new tab, a laptop picked up the next morning: the sign-in page
+comes first. Nothing is kept in the browser between sittings, so a shared
+plant computer holds no session for the next person to walk into. The draft
+is not touched by this and neither is the report it belongs to: signing in
+carries on with the same report rather than starting a duplicate, and
+whatever this browser holds and the server does not goes up the moment
+there is a password behind it. Within a sitting you stay in — a server that
+cannot be reached is not a reason to log anybody out, and the session
+renews itself, so a long day on site does not end in a surprise. Only a
 definite "that token is no longer valid" returns you to the sign-in page,
-with the reason on screen and the draft untouched. A session renews itself
-while it is in use, so a long day on site does not end in a surprise.
+with the reason on screen and the draft untouched.
 
 **Two people on one report do not overwrite each other.** The second save is
 refused, saving pauses rather than retrying into the same wall, and the

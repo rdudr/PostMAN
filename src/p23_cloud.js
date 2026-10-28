@@ -38,11 +38,14 @@
         lean on: a browser being closed cannot be relied upon, so nothing
         depends on it alone.
 
-   And the session: a stored sign-in is believed at once and checked against
-   the server a moment later. A server that cannot be reached leaves you
-   signed in - a blip in a plant basement is not a reason to log somebody
-   out - while a definite "that token is no longer valid" returns you to the
-   door, with the reason given and the draft untouched.
+   And the session: opening the page asks who you are, every time and on
+   every machine. Nothing is carried over from the last sitting, which is
+   why rule 4 happens at SIGN-IN rather than at boot - the moment there is
+   a token again is the moment the server can be caught up. A server that
+   cannot be reached during the sitting leaves you signed in, because a
+   blip in a plant basement is not a reason to log somebody out; only a
+   definite "that token is no longer valid" returns you to the door, with
+   the reason given and the draft untouched.
    =================================================================== */
 
 var EASS_DEFAULT = 'https://eass.eassiitgn.page';
@@ -138,8 +141,12 @@ function cloudLogin(email, password){
       c.lastError = ''; CLOUD_FAILS = 0; CLOUD_CONFLICT = ''; CLOUD_CONFLICT_WHO = '';
       saveNow();
       cloudWatchStart();
-      /* Whatever this browser holds and the server does not, goes up now. */
-      cloudPush('signed in');
+      /* Rule 4, and the first thing done with a new token: whatever this
+         browser holds and the server does not goes up now. Reconcile and
+         not a plain push, because the draft may well belong to a report
+         the server already has - including the push that went out as the
+         page closed last night, which this browser never saw land. */
+      cloudReconcile();
       return r.user;
     });
 }
@@ -179,40 +186,6 @@ function cloudLogout(){
    draft that is really just an empty form. */
 function cloudAnyWork(){
   return !!((S.company && S.company.name) || (S.bills && S.bills.length) || (S.ledger && S.ledger.length));
-}
-
-/* ------------------------------------------------------------------
-   PICKING UP WHERE YOU LEFT OFF
-
-   Run once at boot when a token is already in this browser. The token is
-   BELIEVED immediately - the app opens signed in, with no spinner and no
-   flash of the sign-in page - and checked against the server a moment
-   later, which is when a stale one is caught.
-   ------------------------------------------------------------------ */
-function cloudResume(){
-  var c = cloudState();
-  if (!signedIn()) return Promise.resolve(false);
-  return cloudFetch('/api/auth/me').then(function(u){
-    c.user = u;                        /* a renamed account shows its new name */
-    c.lastError = '';
-    return cloudRenewIfStale();
-  }).then(function(){
-    paintCloudStrip();
-    cloudWatchStart();                 /* and keep an eye on what the others do */
-    return cloudReconcile();           /* rule 4: catch the server up, first thing */
-  }).then(function(){
-    return true;
-  }).catch(function(e){
-    /* A 401 has already shown the door, through cloudEndSession. Anything
-       else is the server being unreachable, which is NOT a reason to sign
-       anybody out: stay in, say so in the strip, and look again in a minute. */
-    if (signedIn()){
-      c.lastError = e.message;
-      paintCloudStrip();
-      setTimeout(cloudResume, 60000);
-    }
-    return false;
-  });
 }
 
 /* ---- rule 4: settling up with the server on the way in ---------------
@@ -266,8 +239,10 @@ function cloudReconcile(){
   });
 }
 
-/* A token half-way through its life is replaced, so a long day on site does
-   not end in a sign-out nobody asked for. */
+/* A token half-way through its life is replaced, so a tab left open
+   through a long day on site does not end in a sign-out nobody asked for.
+   Called by the watcher, which is the one thing already ticking while
+   somebody works. */
 function cloudRenewIfStale(){
   var c = cloudState();
   if (!signedIn()) return Promise.resolve(false);
@@ -643,7 +618,9 @@ function cloudWatchStart(){
 }
 function cloudWatchTick(){
   var c = cloudState();
-  if (!signedIn() || !c.reportId || CLOUD_BUSY || CLOUD_CONFLICT) return;
+  if (!signedIn()) return;
+  cloudRenewIfStale();                 /* keeps a long sitting alive */
+  if (!c.reportId || CLOUD_BUSY || CLOUD_CONFLICT) return;
   if (document.visibilityState === 'hidden') return;   /* nobody is looking */
   cloudFetch('/api/reports?company=' + encodeURIComponent(c.company_name || (S.company && S.company.name) || ''))
     .then(function(rows){

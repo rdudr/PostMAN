@@ -240,18 +240,23 @@ function defaultInstruments(){
 
 var S = blankState();
 var KEY = 'postman.report.v2';
-/* WHO YOU ARE IS KEPT APART FROM WHAT YOU ARE WRITING.
+/* A SIGN-IN LASTS AS LONG AS THE PAGE IS OPEN, AND NOT ONE MOMENT LONGER.
 
-   The sign-in used to live inside the report document, so it was written to
-   storage by the same call. That couples two things that have no business
-   being coupled: the moment a report grew past what the browser would store
-   - a few dozen site photographs will do it - the write failed, the failure
-   was swallowed, and the NEXT RELOAD HAD NO SESSION. From the outside that
-   looks like being logged out at random by opening the page again.
+   Opening PostMan asks who you are. Every time, on every machine: a reload,
+   a new tab, a laptop picked up the next morning. No token is written to
+   storage, so there is nothing on a shared plant computer for the next
+   person to walk into, and no way for two people to be the same person
+   because one of them borrowed a browser.
 
-   The session is a few hundred bytes. On its own key it is written in its
-   own call, and no report, however large, can take it down. */
+   What IS kept is the work: the draft, and which report on the server it
+   belongs to. Signing in therefore carries on with the same report rather
+   than starting a duplicate of it - the password box is a door, not a
+   reset. The old key is removed on the way past, because a build before
+   this one did keep the token there. */
 var SESS_KEY = 'postman.session.v1';
+/* Of the cloud block, only these survive a reload. Everything else -
+   token, user, tokenAt, offlineChosen - is this sitting only. */
+var SESSION_KEPT = { server:1, reportId:1, version:1, lastMark:1, autosave:1 };
 
 function loadState(){
   try {
@@ -261,12 +266,25 @@ function loadState(){
       migrateState();
     }
   } catch (e) { /* private window or blocked storage - start clean */ }
-  /* The session afterwards and separately, so a report that will not parse
-     or will not fit still cannot sign anybody out. */
-  try {
-    var sess = localStorage.getItem(SESS_KEY);
-    if (sess) S.cloud = deepMerge(S.cloud || {}, JSON.parse(sess));
-  } catch (e) { /* no session kept; the door will ask */ }
+  /* Nobody is signed in by opening a page. A draft written by an older
+     build carries a token inside it, and that one goes too. */
+  if (S.cloud){
+    S.cloud.token = ''; S.cloud.user = null; S.cloud.tokenAt = 0;
+    S.cloud.offlineChosen = false;
+  }
+  try { localStorage.removeItem(SESS_KEY); } catch (e) { }
+}
+
+/* The draft as it goes into storage: the cloud block thinned down to the
+   few fields that are allowed to outlive the page. The swap is put back
+   before anything else can see it, so the running app is untouched. */
+function stateText(){
+  var c = S.cloud;
+  if (!c) return JSON.stringify(S);
+  var thin = {}, k;
+  for (k in c) if (SESSION_KEPT[k]) thin[k] = c[k];
+  S.cloud = thin;
+  try { return JSON.stringify(S); } finally { S.cloud = c; }
 }
 /* Drafts carry the defaults they were saved under. A default that CHANGES
    therefore needs a one-time nudge, or a report started last week keeps
@@ -303,13 +321,8 @@ var LOCAL_SAVE_FAILED = '';
 
 function saveNow(){
   clearTimeout(saveT); saveT = null;
-  /* The session first, and in its own call: it is tiny, it almost never
-     fails, and it must not share the report's fate. */
   try {
-    if (S.cloud) localStorage.setItem(SESS_KEY, JSON.stringify(S.cloud));
-  } catch (e) { /* nothing useful to do; the server will ask again */ }
-  try {
-    localStorage.setItem(KEY, JSON.stringify(S));
+    localStorage.setItem(KEY, stateText());
     if (LOCAL_SAVE_FAILED){
       LOCAL_SAVE_FAILED = '';
       if (typeof paintCloudStrip === 'function') paintCloudStrip();
